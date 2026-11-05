@@ -50,11 +50,18 @@ def test_health_check(client):
     assert res.status_code == 200
     assert "Launch Radar" in res.text
 
+    # HEAD request support for Uptime monitors
+    res_head = client.head("/")
+    assert res_head.status_code == 200
+
     res = client.get("/health")
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "ok"
     assert "env" in data
+
+    res_health_head = client.head("/health")
+    assert res_health_head.status_code == 200
 
 
 def test_list_projects_and_feed(client, db_engine):

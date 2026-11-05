@@ -149,7 +149,7 @@ class BlacklistResponse(BaseModel):
 #  Endpoints
 # ══════════════════════════════════════════════════════════════════
 
-@app.get("/", response_class=HTMLResponse, tags=["Dashboard"])
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse, tags=["Dashboard"])
 async def dashboard_home() -> str:
     """Live web dashboard UI for monitoring the token sniper radar."""
     return """<!DOCTYPE html>
@@ -403,7 +403,7 @@ async def dashboard_home() -> str:
 </html>
 """
 
-@app.get("/health", response_model=HealthResponse, tags=["System"])
+@app.api_route("/health", methods=["GET", "HEAD"], response_model=HealthResponse, tags=["System"])
 async def health_check() -> HealthResponse:
     """System health and environment status."""
     return HealthResponse(
