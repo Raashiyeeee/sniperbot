@@ -1,0 +1,13 @@
+{
+  "include": [
+    "."
+  ],
+  "extraPaths": [
+    ".",
+    "./scripts",
+    "./telegram_bot"
+  ],
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none",
+  "reportMissingTypeStubs": false
+}

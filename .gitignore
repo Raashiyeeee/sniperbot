@@ -1,0 +1,38 @@
+# ── Environment Secrets & Config ──
+.env
+.env.local
+.env.*.local
+
+# ── Local Databases ──
+*.db
+*.sqlite
+*.sqlite3
+radar_dev.db
+
+# ── Python & Bytecode Cache ──
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# ── Application Logs ──
+logs/
+*.log
+
+# ── Virtual Environments ──
+venv/
+.venv/
+env/
+ENV/
+
+# ── Editor & IDE Artifacts ──
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
