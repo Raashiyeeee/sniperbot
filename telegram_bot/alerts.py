@@ -137,18 +137,81 @@ class AlertService:
         elif "robinhood" in network.lower() or "rh" in network.lower() or "evm" in network.lower():
             network = "Robinhood Chain"
 
-        text = (
-            "🚨 New launch announcement detected\n"
-            "Filtered\n"
-            "\n"
-            f"Project: {project_str}\n"
-            f"Announcement: {announcement_summary}\n"
-            f"Expected CA: {expected_ca}\n"
-            f"Launch time: {launch_time}\n"
-            f"X Post: {post_url}\n"
-            f"X Profile: {x_profile}\n"
-            f"Network: {network}"
-        )
+        # Check if project has AI intelligence results
+        ai_scores = project.ai_scores_breakdown or {}
+        v_flags = project.verification_flags or {}
+        rec = project.ai_recommendation or "REVIEW"
+        overall = project.ai_score if project.ai_score is not None else (project.score or 0.0)
+
+        if project.ai_scores_breakdown:
+            util_s = int(ai_scores.get("product_utility", 0))
+            cred_s = int(ai_scores.get("project_credibility", 0))
+            comm_s = int(ai_scores.get("community_quality", 0))
+            acct_s = int(ai_scores.get("x_account_credibility", 0))
+            conf_s = int(ai_scores.get("token_launch_confirmation", 0))
+
+            website_ver = v_flags.get("official_website", "Unknown")
+            product_ver = v_flags.get("product_existence", "Unknown")
+            x_ver = v_flags.get("official_x_account", "Unknown")
+            team_ver = v_flags.get("team_association", "Unknown")
+            comm_ver = v_flags.get("community_activity", "Unknown")
+            launch_ver = v_flags.get("token_launch_announcement", "Unknown")
+
+            red_flags = project.red_flags or []
+            red_flags_str = "\n".join(f"- {rf}" for rf in red_flags) if red_flags else "None detected"
+            missing_info = project.missing_information or []
+            missing_str = "\n".join(f"- {m}" for m in missing_info) if missing_info else "None"
+
+            category_str = project.category or "Utility"
+            website_str = project.website_url or "Not specified"
+            tg_str = project.official_telegram or "Not specified"
+
+            text = (
+                "🚀 NEW PROJECT DETECTED\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "PROJECT INFORMATION\n\n"
+                f"Name: {project_str}\n"
+                f"Category: {category_str}\n"
+                f"Blockchain: {network}\n\n"
+                f"Website: {website_str}\n"
+                f"X Account: {x_profile}\n"
+                f"Telegram: {tg_str}\n\n"
+                f"Original Announcement:\n{post_url}\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "AI PROJECT INTELLIGENCE\n\n"
+                f"Product Utility: {util_s}/100\n"
+                f"Project Credibility: {cred_s}/100\n"
+                f"Community Quality: {comm_s}/100\n"
+                f"X Account Credibility: {acct_s}/100\n"
+                f"Token Launch Confirmation: {conf_s}/100\n\n"
+                f"OVERALL QUALITY: {int(overall)}/100\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "VERIFICATION\n\n"
+                f"[{website_ver}] Official website\n"
+                f"[{product_ver}] Product existence\n"
+                f"[{x_ver}] Official X account\n"
+                f"[{team_ver}] Team association\n"
+                f"[{comm_ver}] Community activity\n"
+                f"[{launch_ver}] Token launch announcement\n\n"
+                f"RED FLAGS:\n{red_flags_str}\n\n"
+                f"MISSING INFORMATION:\n{missing_str}\n\n"
+                "CONTRACT ADDRESS: NOT YET AVAILABLE\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                f"AI RECOMMENDATION: [{rec}]"
+            )
+        else:
+            text = (
+                "🚨 New launch announcement detected\n"
+                "Filtered\n"
+                "\n"
+                f"Project: {project_str}\n"
+                f"Announcement: {announcement_summary}\n"
+                f"Expected CA: {expected_ca}\n"
+                f"Launch time: {launch_time}\n"
+                f"X Post: {post_url}\n"
+                f"X Profile: {x_profile}\n"
+                f"Network: {network}"
+            )
 
         keyboard = InlineKeyboardMarkup(
             [

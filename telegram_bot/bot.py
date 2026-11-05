@@ -234,6 +234,15 @@ class TelegramBot:
     ) -> None:
         """Approve a project, edit Telegram message, and queue for CA monitoring."""
         log = self._log.bind(project_id=str(project.id), operator_id=operator_id)
+
+        # Idempotency guard for repeated clicks
+        if project.status == ProjectStatus.APPROVED:
+            await query.answer("✓ Project is already approved and in CA monitoring.", show_alert=False)
+            return
+        if project.status == ProjectStatus.REJECTED:
+            await query.answer("✕ Project has already been rejected and blacklisted.", show_alert=False)
+            return
+
         log.info("approving_project")
 
         project.status = ProjectStatus.APPROVED  # type: ignore[assignment]
@@ -283,6 +292,15 @@ class TelegramBot:
     ) -> None:
         """Reject a project, edit Telegram message, and add to blacklist."""
         log = self._log.bind(project_id=str(project.id), operator_id=operator_id)
+
+        # Idempotency guard for repeated clicks
+        if project.status == ProjectStatus.REJECTED:
+            await query.answer("✕ Project has already been rejected and blacklisted.", show_alert=False)
+            return
+        if project.status == ProjectStatus.APPROVED:
+            await query.answer("✓ Project is already approved.", show_alert=False)
+            return
+
         log.info("rejecting_project")
 
         project.status = ProjectStatus.REJECTED  # type: ignore[assignment]
@@ -342,20 +360,34 @@ class TelegramBot:
         log.info("sending_details")
 
         details = (
-            f"📋 Project Details\n"
-            f"──────────────────\n"
+            f"📋 Project Intelligence Details\n"
+            f"───────────────────────────────\n"
             f"ID:              {project.id}\n"
             f"Name:            {project.name or 'N/A'}\n"
             f"Ticker:          {project.ticker or 'N/A'}\n"
+            f"Category:        {project.category or 'Utility'}\n"
             f"Chain:           {project.chain_id or 'Unknown'}\n"
             f"Status:          {project.status}\n"
-            f"Score:           {project.score if project.score is not None else 'N/A'}\n"
-            f"Description:     {project.description or 'N/A'}\n"
-            f"Expected launch: {project.expected_launch_at or 'Not stated'}\n"
-            f"CA source:       {project.expected_ca_source or 'Unknown'}\n"
+            f"Overall Quality: {project.ai_score if project.ai_score is not None else (project.score or 'N/A')}/100\n"
+            f"Recommendation:  {project.ai_recommendation or 'N/A'}\n"
+            f"Website:         {project.website_url or 'N/A'}\n"
+            f"Official X:      {project.official_x_handle or 'N/A'}\n"
+            f"Expected launch: {project.expected_launch_at or project.launch_time_str or 'Not stated'}\n"
+            f"CA Expected:     {project.expected_ca_time_str or 'Not stated'}\n"
             f"Blacklisted:     {project.is_blacklisted}\n"
-            f"Created at:      {project.created_at}\n"
         )
+        if project.ai_scores_breakdown:
+            details += (
+                f"\n📊 Sub-scores:\n"
+                f"- Product Utility: {project.ai_scores_breakdown.get('product_utility', 'N/A')}/100\n"
+                f"- Credibility:     {project.ai_scores_breakdown.get('project_credibility', 'N/A')}/100\n"
+                f"- Community:       {project.ai_scores_breakdown.get('community_quality', 'N/A')}/100\n"
+                f"- X Account:       {project.ai_scores_breakdown.get('x_account_credibility', 'N/A')}/100\n"
+                f"- Confirmation:    {project.ai_scores_breakdown.get('token_launch_confirmation', 'N/A')}/100\n"
+                f"- Ecosystem:       {project.ai_scores_breakdown.get('ecosystem_presence', 'N/A')}/100\n"
+            )
+        if project.red_flags:
+            details += f"\n🚩 Red Flags: {', '.join(project.red_flags)}\n"
 
         chat_to_reply = update.effective_chat or (query.message.chat if query.message else None)
         if chat_to_reply is not None:

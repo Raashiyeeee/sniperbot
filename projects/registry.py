@@ -163,6 +163,49 @@ class ProjectRegistry:
         log.info("project_registry.created", project_id=project.id, ticker=project.ticker)
         return project, True
 
+    def apply_ai_intelligence(
+        self,
+        project: Project,
+        ai_result: Any,
+    ) -> None:
+        """Enrich Project model with validated Gemini AI intelligence."""
+        if ai_result is None:
+            return
+
+        proj_info = getattr(ai_result, "project", None)
+        qa = getattr(ai_result, "quality_assessment", None)
+        ver = getattr(ai_result, "verification", None)
+
+        if proj_info:
+            category_val = getattr(proj_info.primary_category, "value", str(proj_info.primary_category))
+            project.category = category_val
+            project.categories = getattr(proj_info, "categories", [category_val])
+            if proj_info.website_url and not project.website_url:
+                project.website_url = proj_info.website_url
+            if proj_info.official_telegram and not project.official_telegram:
+                project.official_telegram = proj_info.official_telegram
+            if proj_info.founder_team:
+                project.founder_team_info = proj_info.founder_team
+            if proj_info.product_summary:
+                project.product_summary = proj_info.product_summary
+            if proj_info.documentation_url:
+                project.documentation_url = proj_info.documentation_url
+
+        if qa:
+            project.ai_score = qa.overall_score
+            project.score = qa.overall_score
+            project.ai_scores_breakdown = qa.sub_scores
+            project.ai_recommendation = getattr(qa.recommendation, "value", str(qa.recommendation))
+            project.red_flags = qa.red_flags
+            project.missing_information = qa.missing_information
+
+        if ver:
+            project.verification_flags = (
+                ver.model_dump() if hasattr(ver, "model_dump") else ver
+            )
+
+        project.ai_evaluated_at = datetime.now(timezone.utc)
+
     async def create_announcement(
         self,
         project_id: str,

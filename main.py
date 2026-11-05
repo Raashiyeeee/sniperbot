@@ -45,6 +45,10 @@ from trading.emergency import EmergencyManager
 from trading.order_manager import OrderManager
 from trading.wallet_manager import WalletManager
 from volume.pool_volume_tracker import PoolVolumeTracker
+from ai.project_evaluator import ProjectEvaluator
+from ai.gemini_client import GeminiClient
+from ai.cache import EvaluationCacheManager
+from database.models import AccountSnapshot, Platform
 
 structlog.configure(
     processors=[
@@ -72,6 +76,9 @@ tax_checker = TaxChecker()
 volume_tracker = PoolVolumeTracker()
 security_scanner = ContractSecurityScanner()
 official_filter = OfficialPageFilter()
+gemini_client = GeminiClient()
+cache_manager = EvaluationCacheManager()
+project_evaluator = ProjectEvaluator(gemini_client=gemini_client, cache_manager=cache_manager)
 
 
 async def process_message(
@@ -173,8 +180,46 @@ async def process_message(
                     logger.info("non_official_post_ignored", handle=message.get("author_id"), reason=official_reason)
                     return
 
+            ai_result = None
+            if existing_project is None or existing_project.status == ProjectStatus.PENDING_APPROVAL:
+                # Stage 2: Gemini AI Evaluation & Verification
+                ai_result = await project_evaluator.evaluate_project(
+                    post_text=text,
+                    platform=platform,
+                    author_handle=message.get("author_id") or parsed.author_id,
+                    author_name=message.get("author_name"),
+                    author_bio=message.get("author_bio"),
+                    post_url=parsed.post_url or message.get("post_url"),
+                    extracted_name=parsed.project_name,
+                    extracted_ticker=parsed.ticker,
+                    extracted_chain=parsed.chain_id,
+                    session=session,
+                )
+
+                # Check mandatory rejection conditions (Prompt §6: impersonation, malicious, unauthorized, not a token launch)
+                if ai_result.quality_assessment.mandatory_rejection:
+                    logger.warning(
+                        "candidate_rejected_by_ai_mandatory_rule",
+                        reason=ai_result.quality_assessment.mandatory_rejection_reason,
+                        red_flags=ai_result.quality_assessment.red_flags,
+                    )
+                    return
+
+                # Check minimum quality score (Prompt §6, default 80.0)
+                # If score is below 60, reject immediately. If between 60 and min_score, mark for review.
+                if ai_result.quality_assessment.overall_score < 60.0:
+                    logger.info(
+                        "candidate_rejected_below_quality_threshold",
+                        score=ai_result.quality_assessment.overall_score,
+                    )
+                    return
+
             registry = ProjectRegistry(session)
             project, created = await registry.get_or_create_project(parsed)
+
+            if ai_result is not None:
+                registry.apply_ai_intelligence(project, ai_result)
+
             announcement = await registry.create_announcement(
                 project_id=project.id,
                 parsed=parsed,
@@ -182,9 +227,38 @@ async def process_message(
             )
             await session.commit()
 
+            # Record AccountSnapshot for social tracking (Prompt §4 & §11)
+            if platform == "x" and parsed.author_id and created:
+                try:
+                    snapshot = AccountSnapshot(
+                        platform=Platform.X,
+                        account_id=str(message.get("author_account_id") or message.get("author_id")),
+                        handle=str(parsed.author_id).lstrip("@"),
+                        display_name=message.get("author_name"),
+                        bio=message.get("author_bio"),
+                        followers_count=message.get("followers_count"),
+                        following_count=message.get("following_count"),
+                        tweet_count=message.get("tweet_count"),
+                        metrics={
+                            "score": ai_result.social_analysis.account_credibility_score if ai_result else None,
+                            "community_score": ai_result.social_analysis.community_quality_score if ai_result else None,
+                        },
+                    )
+                    session.add(snapshot)
+                    await session.commit()
+                except Exception as snap_err:
+                    logger.debug("account_snapshot_skipped", error=str(snap_err))
+
             # 5. Handle New Launch Announcement
             if created:
-                logger.info("new_project_registered", project_id=project.id, name=project.name, status=project.status)
+                logger.info(
+                    "new_project_registered",
+                    project_id=project.id,
+                    name=project.name,
+                    category=project.category,
+                    ai_score=project.ai_score,
+                    status=project.status,
+                )
                 await alert_service.send_launch_detected(project, announcement)
                 return
 

@@ -52,6 +52,29 @@ class Settings(BaseSettings):
     rapidapi_search_queries: str = '"CA soon" OR "contract dropping soon"'
     min_tweet_date: str = "2026-10-01"
 
+    # ── Google Gemini AI Provider ─────────────────────────────────
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+    gemini_enabled: bool = True
+    gemini_timeout: float = 30.0
+    gemini_max_retries: int = 3
+    gemini_max_daily_requests: int = 1000
+
+    # ── AI Scoring Weights & Thresholds ────────────────────────────
+    ai_min_project_score: float = 80.0
+    ai_utility_weight: float = 25.0
+    ai_credibility_weight: float = 20.0
+    ai_community_weight: float = 15.0
+    ai_x_account_weight: float = 15.0
+    ai_launch_confirmation_weight: float = 15.0
+    ai_ecosystem_weight: float = 10.0
+
+    # ── Trading & Verification Gates ──────────────────────────────
+    require_manual_project_approval: bool = True
+    require_verified_official_ca: bool = True
+    enable_live_trading: bool = False
+    ca_execution_target_ms: int = 2000
+
     # ── Risk limits ───────────────────────────────────────────────
     max_buy_tax_pct: float = 3.0
     max_sell_tax_pct: float = 3.0

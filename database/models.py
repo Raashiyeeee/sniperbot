@@ -151,6 +151,23 @@ class Project(Base):
         Enum(ProjectStatus), nullable=False, default=ProjectStatus.DETECTED
     )
     score: Mapped[Optional[float]] = mapped_column(Float)
+
+    # ── AI Intelligence Fields ──────────────────────────────────────
+    category: Mapped[Optional[str]] = mapped_column(String(64))
+    categories: Mapped[Optional[list]] = mapped_column(JSON_TYPE, default=list)
+    ai_score: Mapped[Optional[float]] = mapped_column(Float)
+    ai_scores_breakdown: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, default=dict)
+    ai_analysis: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, default=dict)
+    ai_recommendation: Mapped[Optional[str]] = mapped_column(String(64))
+    verification_flags: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, default=dict)
+    red_flags: Mapped[Optional[list]] = mapped_column(JSON_TYPE, default=list)
+    missing_information: Mapped[Optional[list]] = mapped_column(JSON_TYPE, default=list)
+    ai_evaluated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    founder_team_info: Mapped[Optional[str]] = mapped_column(Text)
+    product_summary: Mapped[Optional[str]] = mapped_column(Text)
+    documentation_url: Mapped[Optional[str]] = mapped_column(String(1024))
+    ecosystem_links: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, default=dict)
+
     # Identity keys for deduplication
     identity_keys: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, default=dict)
     is_blacklisted: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -427,5 +444,46 @@ class Position(Base):
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     project: Mapped["Project"] = relationship(back_populates="positions")
+
+
+# ══════════════════════════════════════════════════════════════════
+#  AccountSnapshot — Historical social account metadata tracking
+# ══════════════════════════════════════════════════════════════════
+
+class AccountSnapshot(Base):
+    __tablename__ = "account_snapshots"
+
+    id: Mapped[str]              = mapped_column(UUID_TYPE, primary_key=True, default=_uuid)
+    platform: Mapped[str]        = mapped_column(Enum(Platform), nullable=False, default=Platform.X)
+    account_id: Mapped[str]      = mapped_column(String(256), nullable=False, index=True)
+    handle: Mapped[str]          = mapped_column(String(256), nullable=False, index=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(512))
+    bio: Mapped[Optional[str]]   = mapped_column(Text)
+    followers_count: Mapped[Optional[int]] = mapped_column(Integer)
+    following_count: Mapped[Optional[int]] = mapped_column(Integer)
+    tweet_count: Mapped[Optional[int]]     = mapped_column(Integer)
+    account_created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    metrics: Mapped[Optional[dict]] = mapped_column(JSON_TYPE)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ══════════════════════════════════════════════════════════════════
+#  AIEvaluationCache — Persistent cache for Gemini evaluations
+# ══════════════════════════════════════════════════════════════════
+
+class AIEvaluationCache(Base):
+    __tablename__ = "ai_evaluation_cache"
+
+    id: Mapped[str]              = mapped_column(UUID_TYPE, primary_key=True, default=_uuid)
+    cache_key: Mapped[str]       = mapped_column(String(256), nullable=False, unique=True, index=True)
+    project_name: Mapped[Optional[str]] = mapped_column(String(256))
+    source_url: Mapped[Optional[str]]   = mapped_column(String(2048))
+    evaluation_data: Mapped[dict]       = mapped_column(JSON_TYPE, nullable=False)
+    overall_score: Mapped[float]        = mapped_column(Float, default=0.0)
+    recommendation: Mapped[str]         = mapped_column(String(64), default="REVIEW")
+    model_used: Mapped[str]             = mapped_column(String(128), default="gemini-2.0-flash")
+    created_at: Mapped[datetime]        = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
 
 
