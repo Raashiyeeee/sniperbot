@@ -70,10 +70,16 @@ class GeminiClient:
     ) -> None:
         settings = get_settings()
         self.api_key = api_key or settings.gemini_api_key
-        self.model = model or settings.gemini_model or "gemini-2.0-flash"
+        self.model = model or settings.gemini_model or "gemini-flash-lite-latest"
         self.timeout = timeout or settings.gemini_timeout or 30.0
-        self.max_retries = max_retries or settings.gemini_max_retries or 3
+        self.max_retries = max_retries or settings.gemini_max_retries or 5
         self.daily_limit = daily_limit or settings.gemini_max_daily_requests or 1000
+
+        # High-availability model candidate fallback list
+        self.fallback_models = [self.model]
+        for alt in ("gemini-flash-lite-latest", "gemini-flash-latest"):
+            if alt not in self.fallback_models:
+                self.fallback_models.append(alt)
 
         self._daily_requests: int = 0
         self._last_reset_date = datetime.now(timezone.utc).date()
@@ -85,6 +91,7 @@ class GeminiClient:
             has_key=bool(self.api_key),
             key_preview=mask_key(self.api_key),
             daily_limit=self.daily_limit,
+            fallback_models=self.fallback_models,
         )
 
     def _check_and_reset_daily_budget(self) -> None:
@@ -116,17 +123,15 @@ class GeminiClient:
     ) -> Dict[str, Any]:
         """
         Send a prompt to Gemini with response_mime_type='application/json'
-        and return the parsed JSON dictionary.
+        and return the parsed JSON dictionary. Attempts primary model with
+        automatic failover across high-availability candidates on 503/429 spikes.
         """
         if not self.is_configured:
             raise GeminiAPIError("GEMINI_API_KEY is not configured in environment or .env")
 
         await self._increment_request_count()
 
-        # Build payload according to Gemini Developer API v1beta spec
-        url = f"{GEMINI_BASE_URL}/models/{self.model}:generateContent"
         params: Dict[str, str] = {}
-
         payload: Dict[str, Any] = {
             "contents": [
                 {
@@ -150,11 +155,27 @@ class GeminiClient:
             "User-Agent": "Antigravity-SniperBot/3.2.0",
         }
 
-        # Execute with exponential backoff
-        return await self._call_with_retry(url, params, headers, payload)
+        last_err: Optional[Exception] = None
+        for model_candidate in self.fallback_models:
+            url = f"{GEMINI_BASE_URL}/models/{model_candidate}:generateContent"
+            try:
+                return await self._call_with_retry(model_candidate, url, params, headers, payload)
+            except GeminiAPIError as err:
+                last_err = err
+                logger.info(
+                    "gemini_trying_fallback_model",
+                    failed_model=model_candidate,
+                    error=str(err),
+                )
+                continue
+
+        if last_err:
+            raise last_err
+        raise GeminiAPIError("All Gemini model endpoints failed.")
 
     async def _call_with_retry(
         self,
+        model_name: str,
         url: str,
         params: Dict[str, str],
         headers: Dict[str, str],
@@ -178,16 +199,16 @@ class GeminiClient:
                     return self._extract_json_from_response(data)
 
                 elif response.status_code == 429:
-                    logger.warning("gemini_rate_limited", attempt=attempt, status=429)
-                    if attempt == self.max_retries:
-                        raise GeminiRateLimitError("Gemini rate limit exceeded after retries")
+                    logger.warning("gemini_rate_limited", model=model_name, attempt=attempt, status=429)
+                    if attempt >= 2:
+                        raise GeminiRateLimitError(f"Gemini rate limit exceeded for {model_name}")
                     await asyncio.sleep(2.0 ** attempt)
                     continue
 
                 elif response.status_code in (500, 502, 503, 504):
-                    logger.warning("gemini_service_unavailable", status=response.status_code, attempt=attempt)
-                    if attempt == self.max_retries:
-                        raise GeminiAPIError(f"Gemini server error {response.status_code}")
+                    logger.info("gemini_temporary_overload", model=model_name, status=response.status_code, attempt=attempt)
+                    if attempt >= 2:
+                        raise GeminiAPIError(f"Gemini server error {response.status_code} on {model_name}")
                     await asyncio.sleep(1.5 ** attempt)
                     continue
 
@@ -197,9 +218,9 @@ class GeminiClient:
 
             except (httpx.TimeoutException, httpx.NetworkError) as net_err:
                 last_error = net_err
-                logger.warning("gemini_network_timeout", attempt=attempt, error=str(net_err))
-                if attempt == self.max_retries:
-                    raise GeminiAPIError(f"Gemini network error after {self.max_retries} attempts: {net_err}")
+                logger.info("gemini_network_timeout", model=model_name, attempt=attempt, error=str(net_err))
+                if attempt >= 2:
+                    raise GeminiAPIError(f"Gemini network timeout on {model_name}: {net_err}")
                 await asyncio.sleep(1.5 ** attempt)
 
         raise GeminiAPIError(f"Gemini request failed: {last_error}")

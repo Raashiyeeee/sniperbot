@@ -99,7 +99,80 @@ def test_scenario_01_gaming_project_tge():
     async def _test():
         engine, session = await _setup_session()
         try:
-            evaluator = ProjectEvaluator()
+            mock_gemini = MagicMock(spec=GeminiClient)
+            mock_gemini.is_configured = True
+            mock_gemini.model = "gemini-flash-lite-latest"
+            mock_gemini.generate_structured_json = AsyncMock(return_value={
+                "project": {
+                    "name": "Mythic Games",
+                    "ticker": "MYTHIC",
+                    "primary_category": "Gaming",
+                    "categories": ["Gaming"],
+                    "blockchain": "Solana",
+                    "website_url": "https://mythicgames.io",
+                    "official_x_handle": "@MythicGamesStudio",
+                    "founder_team": "Mythic Team",
+                    "product_summary": "Web3 battle RPG game on Solana.",
+                    "documentation_url": "https://docs.mythicgames.io",
+                },
+                "product_analysis": {
+                    "has_real_product": True,
+                    "has_functional_website": True,
+                    "has_documentation": True,
+                    "utility_score": 90.0,
+                    "verified_evidence": ["Playable demo live on mainnet"],
+                    "unknowns": [],
+                    "red_flags": [],
+                },
+                "credibility_analysis": {
+                    "official_source_confirmed": True,
+                    "team_identifiable": True,
+                    "website_verified": True,
+                    "ecosystem_presence": True,
+                    "credibility_score": 85.0,
+                    "ecosystem_score": 85.0,
+                    "evidence": ["Solana grant recipient"],
+                    "red_flags": [],
+                },
+                "social_analysis": {
+                    "account_credibility_score": 85.0,
+                    "community_quality_score": 85.0,
+                    "account_age_assessment": "Established 2022",
+                    "organic_engagement_detected": True,
+                    "bot_activity_suspected": False,
+                    "username_change_risk": False,
+                    "red_flags": [],
+                },
+                "announcement_analysis": {
+                    "announcement_type": "UPCOMING_TGE",
+                    "is_official_announcement": True,
+                    "is_authorized_source": True,
+                    "launch_confirmed": True,
+                    "confirmation_score": 90.0,
+                    "announcement_url": "https://x.com/MythicGamesStudio/status/1",
+                    "launch_date_str": "Tomorrow 2 PM UTC",
+                    "expected_ca_time_str": "Tomorrow 2 PM UTC",
+                },
+                "verification": {
+                    "official_website": "Verified",
+                    "product_existence": "Verified",
+                    "official_x_account": "Verified",
+                    "team_association": "Verified",
+                    "community_activity": "Verified",
+                    "token_launch_announcement": "Verified",
+                },
+                "quality_assessment": {
+                    "overall_score": 88.0,
+                    "risk_level": "LOW",
+                    "recommendation": "HIGH_QUALITY",
+                    "mandatory_rejection": False,
+                    "mandatory_rejection_reason": None,
+                    "red_flags": [],
+                    "missing_information": [],
+                    "reasoning_summary": "Legitimate Web3 gaming studio with working product and announced TGE.",
+                },
+            })
+            evaluator = ProjectEvaluator(gemini_client=mock_gemini)
             post_text = "We are thrilled to announce the official TGE and CA soon for $MYTHIC! Our Web3 battle RPG game is launching on Solana tomorrow at 2 PM UTC."
             result = await evaluator.evaluate_project(
                 post_text=post_text,
@@ -128,7 +201,80 @@ def test_scenario_02_defi_project_working_app():
     async def _test():
         engine, session = await _setup_session()
         try:
-            evaluator = ProjectEvaluator()
+            mock_gemini = MagicMock(spec=GeminiClient)
+            mock_gemini.is_configured = True
+            mock_gemini.model = "gemini-flash-lite-latest"
+            mock_gemini.generate_structured_json = AsyncMock(return_value={
+                "project": {
+                    "name": "Lend Protocol",
+                    "ticker": "LEND",
+                    "primary_category": "DeFi",
+                    "categories": ["DeFi"],
+                    "blockchain": "Solana",
+                    "website_url": "https://lendprotocol.finance",
+                    "official_x_handle": "@LendProtocolOfficial",
+                    "founder_team": "Lend Finance Team",
+                    "product_summary": "Lending and borrowing protocol with $50M DEX volume.",
+                    "documentation_url": "https://docs.lendprotocol.finance",
+                },
+                "product_analysis": {
+                    "has_real_product": True,
+                    "has_functional_website": True,
+                    "has_documentation": True,
+                    "utility_score": 92.0,
+                    "verified_evidence": ["$50M DEX TVL verified via on-chain lending pools"],
+                    "unknowns": [],
+                    "red_flags": [],
+                },
+                "credibility_analysis": {
+                    "official_source_confirmed": True,
+                    "team_identifiable": True,
+                    "website_verified": True,
+                    "ecosystem_presence": True,
+                    "credibility_score": 88.0,
+                    "ecosystem_score": 85.0,
+                    "evidence": ["Verified DeFi protocol"],
+                    "red_flags": [],
+                },
+                "social_analysis": {
+                    "account_credibility_score": 85.0,
+                    "community_quality_score": 80.0,
+                    "account_age_assessment": "Established account",
+                    "organic_engagement_detected": True,
+                    "bot_activity_suspected": False,
+                    "username_change_risk": False,
+                    "red_flags": [],
+                },
+                "announcement_analysis": {
+                    "announcement_type": "UPCOMING_TGE",
+                    "is_official_announcement": True,
+                    "is_authorized_source": True,
+                    "launch_confirmed": True,
+                    "confirmation_score": 90.0,
+                    "announcement_url": "https://x.com/LendProtocolOfficial/status/1",
+                    "launch_date_str": "Confirmed soon",
+                    "expected_ca_time_str": "Confirmed soon",
+                },
+                "verification": {
+                    "official_website": "Verified",
+                    "product_existence": "Verified",
+                    "official_x_account": "Verified",
+                    "team_association": "Verified",
+                    "community_activity": "Verified",
+                    "token_launch_announcement": "Verified",
+                },
+                "quality_assessment": {
+                    "overall_score": 89.0,
+                    "risk_level": "LOW",
+                    "recommendation": "HIGH_QUALITY",
+                    "mandatory_rejection": False,
+                    "mandatory_rejection_reason": None,
+                    "red_flags": [],
+                    "missing_information": [],
+                    "reasoning_summary": "Legitimate DeFi lending protocol with active volume.",
+                },
+            })
+            evaluator = ProjectEvaluator(gemini_client=mock_gemini)
             post_text = "After $50M in DEX volume on our lending protocol, native governance token $LEND TGE confirmed! CA dropping soon on Solana."
             result = await evaluator.evaluate_project(
                 post_text=post_text,
