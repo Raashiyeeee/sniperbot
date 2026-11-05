@@ -54,7 +54,7 @@ class Settings(BaseSettings):
 
     # ── Google Gemini AI Provider ─────────────────────────────────
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-flash-lite-latest"
     gemini_enabled: bool = True
     gemini_timeout: float = 30.0
     gemini_max_retries: int = 3

@@ -14,12 +14,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import httpx
 import structlog
+
+# Suppress verbose raw HTTP wire logs from httpx
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 from config.settings import get_settings
 
@@ -121,7 +125,7 @@ class GeminiClient:
 
         # Build payload according to Gemini Developer API v1beta spec
         url = f"{GEMINI_BASE_URL}/models/{self.model}:generateContent"
-        params = {"key": self.api_key}
+        params: Dict[str, str] = {}
 
         payload: Dict[str, Any] = {
             "contents": [
@@ -142,6 +146,7 @@ class GeminiClient:
 
         headers = {
             "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key,
             "User-Agent": "Antigravity-SniperBot/3.2.0",
         }
 
