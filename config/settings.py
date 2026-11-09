@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     # ── RapidAPI Twitter/X ─────────────────────────────────────────
     rapidapi_key: str = ""
     rapidapi_twitter_host: str = "twitter-api45.p.rapidapi.com"
-    rapidapi_poll_interval_seconds: float = 60.0
+    rapidapi_poll_interval_seconds: float = 300.0
     # Faster cadence for approved official handles (target CA→buy within seconds)
     rapidapi_approved_poll_interval_seconds: float = 3.0
     rapidapi_search_queries: str = '"CA soon" OR "contract dropping soon"'
