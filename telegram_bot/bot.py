@@ -9,6 +9,7 @@ refused.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import uuid
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -32,7 +33,7 @@ from database.models import (
     Project,
     ProjectStatus,
 )
-from projects.account_manager import AccountManager
+from projects.account_manager import AccountManager, normalize_x_handle
 
 if TYPE_CHECKING:
     from collections.abc import Callable

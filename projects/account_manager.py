@@ -86,7 +86,7 @@ def parse_telegram_ref(raw: str) -> Tuple[Optional[str], Optional[str]]:
 
 
 def _admin_ids_payload(admin_ids: List[str]) -> dict:
-    return {"admins": [str(a) for a in admin_ids]}
+    return {"admins": list(admin_ids)}
 
 
 class AccountManager:
@@ -179,7 +179,7 @@ class AccountManager:
         if username:
             project.official_telegram = username
         if chat_id:
-            project.official_telegram_chat_id = str(chat_id)
+            project.official_telegram_chat_id = chat_id
         project.updated_at = datetime.now(timezone.utc)
 
         account_id = chat_id or (username or "")
@@ -351,7 +351,7 @@ class AccountManager:
             existing.handle = handle or existing.handle
             existing.is_active = True
             existing.trust_verified = True
-            existing.verified_by = str(operator_id)
+            existing.verified_by = operator_id
             existing.verified_at = now
             existing.source_type = SourceType.OFFICIAL_PROJECT
             if authorized_admin_ids is not None:

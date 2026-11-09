@@ -28,7 +28,14 @@ from config.settings import get_settings
 from connectors.telegram_listener import TelegramListenerConnector
 from connectors.x_stream import XStreamConnector
 from database.connection import AsyncSessionLocal, create_tables
-from database.models import Assessment, CheckResult, EventType, Project, ProjectStatus
+from database.models import (
+    Assessment,
+    CheckResult,
+    EventType,
+    OrderStatus,
+    Project,
+    ProjectStatus,
+)
 from monitoring.announcement_parser import AnnouncementParser
 from monitoring.ca_resolver import CAResolver
 from monitoring.event_detector import EventDetector
