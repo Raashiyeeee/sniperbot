@@ -33,7 +33,27 @@ _TG_USERNAME_RE = re.compile(r"^@?[A-Za-z0-9_]{4,64}$")
 
 
 def normalize_x_handle(raw: str) -> str:
-    return raw.strip().lstrip("@").lower()
+    """
+    Normalize an X handle or full profile URL to a clean lowercase username.
+    Accepts:
+      - https://x.com/username
+      - http://twitter.com/username?s=20
+      - @username
+      - username
+    """
+    val = raw.strip()
+    for prefix in (
+        "https://x.com/", "http://x.com/",
+        "https://www.x.com/", "http://www.x.com/",
+        "https://twitter.com/", "http://twitter.com/",
+        "https://www.twitter.com/", "http://www.twitter.com/",
+        "x.com/", "twitter.com/", "www.x.com/", "www.twitter.com/",
+    ):
+        if val.lower().startswith(prefix):
+            val = val[len(prefix):]
+            break
+    val = val.split("?")[0].split("/")[0].strip()
+    return val.lstrip("@").strip().lower()
 
 
 def parse_telegram_ref(raw: str) -> Tuple[Optional[str], Optional[str]]:
@@ -77,7 +97,7 @@ class AccountManager:
         self._bot = bot
 
     async def resolve_project(self, ref: str) -> Optional[Project]:
-        """Resolve project by UUID or ticker."""
+        """Resolve project by UUID, ticker, or official X handle."""
         ref = ref.strip()
         try:
             uuid.UUID(ref)
@@ -87,9 +107,14 @@ class AccountManager:
         except ValueError:
             pass
 
+        clean_handle = normalize_x_handle(ref)
         stmt = (
             select(Project)
-            .where(Project.ticker == ref.upper())
+            .where(
+                (Project.ticker == ref.upper())
+                | (Project.official_x_handle == clean_handle)
+                | (Project.name == ref)
+            )
             .order_by(Project.created_at.desc())
             .limit(1)
         )

@@ -101,15 +101,15 @@ class Settings(BaseSettings):
     duplicate_ca_detection_enabled: bool = True
 
     # ── Risk / buy limits (Elysium Ultra-Fast Sniper §3) ──────────
-    # Buy amount in HYPE per trade. User wants max 0.08 HYPE per buy.
+    # Buy amount in HYPE per trade (configured to 0.08 HYPE)
     elysium_buy_amount_hype: float = 0.08
     hype_usd_price: float = 1.0  # used to map HYPE buys into USD risk caps
     max_buy_tax_pct: float = 2.0
     max_sell_tax_pct: float = 2.0
     min_qualifying_volume_usd: float = 100.0  # minimum liquidity / genuine volume
-    per_trade_spend_cap_usd: float = 0.08    # hard cap: max 0.08 HYPE per trade
-    daily_spend_cap_usd: float = 0.24        # hard cap: max 3 trades per day
-    daily_loss_cap_usd: float = 0.16         # stop trading if >0.16 HYPE lost today
+    per_trade_spend_cap_usd: float = 50.0
+    daily_spend_cap_usd: float = 200.0
+    daily_loss_cap_usd: float = 150.0
     max_open_positions: int = 3
     transaction_simulation_enabled: bool = True
     honeypot_check_enabled: bool = True

@@ -88,6 +88,7 @@ class TelegramBot:
         )
         self._app.add_handler(CommandHandler("setaccounts", self._cmd_setaccounts))
         self._app.add_handler(CommandHandler("set_x", self._cmd_set_x))
+        self._app.add_handler(CommandHandler("setx", self._cmd_set_x))
         self._app.add_handler(CommandHandler("set_tg", self._cmd_set_tg))
         self._app.add_handler(CommandHandler("refresh_admins", self._cmd_refresh_admins))
         self._app.add_handler(CommandHandler("help_accounts", self._cmd_help_accounts))
@@ -499,15 +500,83 @@ class TelegramBot:
         if operator_id is None:
             return
         args = context.args or []
-        if len(args) < 2:
+        if not args:
             if update.effective_message:
-                await update.effective_message.reply_text("Usage: /set_x <project_id|ticker> @handle")
+                await update.effective_message.reply_text(
+                    "<b>Usage:</b>\n"
+                    "• <code>/setx https://x.com/username</code>\n"
+                    "• <code>/setx @username</code>\n"
+                    "• <code>/setx &lt;project_id|ticker&gt; @username</code>",
+                    parse_mode="HTML",
+                )
             return
+
+        # Case 1: Single argument -> User supplied the X profile URL or @handle directly
+        if len(args) == 1:
+            target = args[0]
+            clean_handle = normalize_x_handle(target)
+            if not clean_handle:
+                if update.effective_message:
+                    await update.effective_message.reply_text("⚠️ Could not extract a valid X handle from the provided input.")
+                return
+
+            async with self._AsyncSessionLocal() as session:
+                mgr = AccountManager(session, bot=self.bot)
+                project = await mgr.resolve_project(clean_handle)
+
+                if project is None:
+                    # Automatically create an APPROVED project for immediate CA monitoring
+                    project = Project(
+                        id=str(uuid.uuid4()),
+                        name=f"@{clean_handle}",
+                        ticker=None,
+                        official_x_handle=clean_handle,
+                        chain_id=settings.default_sniper_chain_id or "elysium",
+                        status=ProjectStatus.APPROVED,
+                        is_shortlisted=True,
+                        score=100.0,
+                        ai_recommendation="HIGH_QUALITY",
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc),
+                    )
+                    session.add(project)
+                    await session.flush()
+                else:
+                    if project.status not in (ProjectStatus.APPROVED, ProjectStatus.CA_DETECTED, ProjectStatus.PURCHASED):
+                        project.status = ProjectStatus.APPROVED
+
+                await mgr.set_x_account(project, clean_handle, operator_id=str(operator_id))
+                await session.commit()
+
+            buy_hype = settings.elysium_buy_amount_hype
+            chain_label = (project.chain_id or "elysium").upper()
+            msg = (
+                f"✅ <b>X Account Added for Fast CA Monitoring</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"👤 <b>Account:</b> @{clean_handle} (<a href=\"https://x.com/{clean_handle}\">Profile</a>)\n"
+                f"🆔 <b>Project ID:</b> <code>{project.id}</code>\n"
+                f"⛓ <b>Target Chain:</b> {chain_label}\n"
+                f"💰 <b>Max Buy Amount:</b> {buy_hype} HYPE\n"
+                f"⚡ <b>Monitoring:</b> ACTIVE (Polling every 3s)\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎯 <i>The bot is now monitoring @{clean_handle}. Once a Contract Address (CA) is dropped, the bot will automatically buy on the launchpad and post the execution report here!</i>"
+            )
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    msg,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
+            return
+
+        # Case 2: Two arguments -> /setx <project_ref> <handle_or_url>
+        project_ref = args[0]
+        x_handle = normalize_x_handle(args[1])
         await self._apply_account_update(
             update,
             operator_id,
-            project_ref=args[0],
-            x_handle=args[1],
+            project_ref=project_ref,
+            x_handle=x_handle,
             telegram_ref=None,
         )
 

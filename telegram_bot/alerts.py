@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.settings import settings
 from database.models import (
     Announcement,
+    Order,
+    Position,
     Project,
     TelegramNotification,
 )
@@ -357,3 +359,107 @@ class AlertService:
             chat_id=settings.telegram_alert_chat_id,
             text=text,
         )
+
+    async def send_buy_success(
+        self,
+        project: Project,
+        order: Order,
+        position: Optional[Position] = None,
+        latency_ms: float = 0.0,
+    ) -> None:
+        """Send immediate notification when an automated token buy succeeds."""
+        chat_id = settings.telegram_alert_chat_id
+        if not chat_id:
+            return
+
+        from datetime import datetime, timezone
+
+        ca_str = order.ca_address or project.ca_address or "Unknown"
+        chain = (order.chain_id or project.chain_id or "elysium").upper()
+        name = project.name or (f"@{project.official_x_handle}" if project.official_x_handle else "Discovered Project")
+        ticker = f" (${project.ticker})" if project.ticker else ""
+        tx_hash = order.tx_hash or "Pending"
+        tokens = (position.quantity if position else 0.0) or (order.quote_data or {}).get("expected_tokens", 0.0)
+        spent_native = order.amount_native or (order.quote_data or {}).get("buy_amount_hype", settings.elysium_buy_amount_hype)
+        fee = order.fee_spent or 0.0
+        route = order.route or "Launchpad / DEX Route"
+
+        explorer_link = (
+            f"https://elysiumexplore.com/tx/{tx_hash}"
+            if "ELYSIUM" in chain and tx_hash.startswith("0x") and len(tx_hash) > 10
+            else None
+        )
+
+        text = (
+            f"🟢 <b>AUTOMATIC TOKEN PURCHASE SUCCESSFUL!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🚀 <b>Project:</b> {name}{ticker}\n"
+            f"⛓ <b>Chain:</b> {chain}\n"
+            f"📋 <b>CA:</b> <code>{ca_str}</code>\n"
+            f"💰 <b>Spent:</b> {spent_native} HYPE\n"
+            f"🪙 <b>Tokens Received:</b> {tokens:,.4f}\n"
+            f"⚡ <b>Execution Latency:</b> {latency_ms:.0f} ms\n"
+            f"⛽ <b>Gas Fee:</b> ~${fee:.4f}\n"
+            f"🛣 <b>Route:</b> <code>{route}</code>\n"
+            f"🔗 <b>Tx Hash:</b> <code>{tx_hash}</code>\n"
+        )
+        if explorer_link:
+            text += f"🔍 <a href=\"{explorer_link}\">View on Block Explorer</a>\n"
+        text += (
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⏰ <b>Executed At:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        )
+
+        self._log.info("sending_buy_success", project_id=str(project.id), tx_hash=tx_hash)
+        try:
+            await self._bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+        except Exception as exc:
+            self._log.warning("failed_sending_buy_success_alert", error=str(exc))
+
+    async def send_buy_failed(
+        self,
+        project: Project,
+        ca_address: str,
+        reason: str,
+    ) -> None:
+        """Send immediate notification when an automated token buy is blocked or fails."""
+        chat_id = settings.telegram_alert_chat_id
+        if not chat_id:
+            return
+
+        from datetime import datetime, timezone
+
+        name = project.name or (f"@{project.official_x_handle}" if project.official_x_handle else "Discovered Project")
+        ticker = f" (${project.ticker})" if project.ticker else ""
+        chain = (project.chain_id or "elysium").upper()
+        amount = settings.elysium_buy_amount_hype
+
+        text = (
+            f"🔴 <b>AUTOMATIC BUY FAILED / BLOCKED</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚠️ <b>Project:</b> {name}{ticker}\n"
+            f"⛓ <b>Chain:</b> {chain}\n"
+            f"📋 <b>Contract:</b> <code>{ca_address}</code>\n"
+            f"💰 <b>Attempted Buy:</b> {amount} HYPE\n"
+            f"❌ <b>Failure Reason:</b>\n"
+            f"<i>{reason}</i>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🛡 <b>Safety Status:</b> Project marked SAFETY_BLOCKED (Funds protected)\n"
+            f"⏰ <b>Time:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        )
+
+        self._log.warning("sending_buy_failed", project_id=str(project.id), ca_address=ca_address, reason=reason)
+        try:
+            await self._bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+        except Exception as exc:
+            self._log.warning("failed_sending_buy_failed_alert", error=str(exc))

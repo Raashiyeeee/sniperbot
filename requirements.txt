@@ -40,4 +40,6 @@ prometheus-client==0.21.0
 tenacity==9.0.0          # retry logic
 pytz==2024.2
 ujson==5.10.0
+web3>=6.0.0
+
 

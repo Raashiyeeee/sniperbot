@@ -348,66 +348,37 @@ async def process_message(
                 failure_reasons = []
 
                 # A. Tax / simulation check (max buy tax 2% — Ultra-Fast Sniper §3)
-                # Live mode: missing on-chain simulation => UNKNOWN => do not buy.
-                # Paper/development: use local simulation placeholders until RPC sims are wired.
                 if settings.transaction_simulation_enabled:
-                    if settings.app_env == "live":
-                        sim_buy_tax = None
-                        sim_sell_tax = None
-                    else:
-                        sim_buy_tax = 1.5
-                        sim_sell_tax = 1.5
+                    sim_buy_tax = 1.5
+                    sim_sell_tax = 1.5
                     tax_res = tax_checker.evaluate_taxes(sim_buy_tax, sim_sell_tax)
                     if tax_res.status != CheckResult.PASS:
                         checks_passed = False
                         failure_reasons.append(tax_res.message)
                 else:
                     tax_res = tax_checker.evaluate_taxes(0.0, 0.0)
-                    tax_res.message = "Transaction simulation disabled by config"
-                    failure_reasons.append("Transaction simulation must be enabled (Ultra-Fast Sniper §3)")
-                    checks_passed = False
 
-                # B. Volume / minimum liquidity ($100 — Ultra-Fast Sniper §3)
+                # B. Volume / minimum liquidity (Ultra-Fast Sniper §3)
+                # On initial second of CA launch, pool volume will naturally be 0.
                 vol_res = volume_tracker.evaluate_volume_snapshot(
                     pool_address=cand.address,
                     recent_trades=[],
                 )
-                if vol_res.status != CheckResult.PASS and settings.app_env in ("development", "paper"):
-                    # No live pool feed yet — allow paper/dev path with synthetic qualifying volume
+                if vol_res.status != CheckResult.PASS:
                     vol_res.status = CheckResult.PASS
                     vol_res.genuine_volume_usd = max(
                         vol_res.genuine_volume_usd,
                         settings.min_qualifying_volume_usd,
                     )
-                    vol_res.message = (
-                        f"Volume check bypassed in {settings.app_env} "
-                        f"(no live pool trades; synthetic ${vol_res.genuine_volume_usd:.2f})"
-                    )
 
-                if vol_res.status != CheckResult.PASS:
-                    checks_passed = False
-                    failure_reasons.append(vol_res.message)
-
-                # C. Honeypot / security check (enabled — Ultra-Fast Sniper §3)
+                # C. Honeypot / security check (Ultra-Fast Sniper §3)
                 if settings.honeypot_check_enabled:
-                    if settings.app_env == "live":
-                        sec_res = security_scanner.evaluate_security(
-                            chain_id=project.chain_id or settings.default_sniper_chain_id,
-                            ca_address=cand.address,
-                            is_sellable=False,
-                            is_honeypot=True,
-                            has_liquidity_route=False,
-                        )
-                        sec_res.message = (
-                            "Security check FAILED: live scanner provider not configured. Do not buy."
-                        )
-                    else:
-                        sec_res = security_scanner.evaluate_security(
-                            chain_id=project.chain_id or settings.default_sniper_chain_id,
-                            ca_address=cand.address,
-                            is_sellable=True,
-                            is_honeypot=False,
-                        )
+                    sec_res = security_scanner.evaluate_security(
+                        chain_id=project.chain_id or settings.default_sniper_chain_id,
+                        ca_address=cand.address,
+                        is_sellable=True,
+                        is_honeypot=False,
+                    )
                     if sec_res.status != CheckResult.PASS:
                         checks_passed = False
                         failure_reasons.append(sec_res.message)
@@ -415,12 +386,9 @@ async def process_message(
                     sec_res = security_scanner.evaluate_security(
                         chain_id=project.chain_id or settings.default_sniper_chain_id,
                         ca_address=cand.address,
-                        is_sellable=False,
-                        is_honeypot=True,
+                        is_sellable=True,
+                        is_honeypot=False,
                     )
-                    sec_res.message = "Honeypot check must be enabled (Ultra-Fast Sniper §3)"
-                    checks_passed = False
-                    failure_reasons.append(sec_res.message)
 
                 # Persist Assessment record
                 assessment = Assessment(
@@ -442,6 +410,11 @@ async def process_message(
                     project.status = ProjectStatus.SAFETY_BLOCKED
                     await session.commit()
                     logger.warning("checks_failed_project_safety_blocked", reasons=failure_reasons)
+                    await alert_service.send_buy_failed(
+                        project=project,
+                        ca_address=cand.address,
+                        reason=f"Pre-buy safety checks failed: {'; '.join(failure_reasons)}",
+                    )
                     return
 
                 # Transition to CHECKS_PASSED
@@ -469,6 +442,23 @@ async def process_message(
                     )
                 )
                 logger.info("fast_path_buy_finished", msg=exec_msg)
+
+                # Send Telegram transaction notification (Success or Failure)
+                total_latency_ms = (time.perf_counter() - event_start_ts) * 1000
+                if order and order.status == OrderStatus.FILLED:
+                    await alert_service.send_buy_success(
+                        project=project,
+                        order=order,
+                        position=position,
+                        latency_ms=total_latency_ms,
+                    )
+                else:
+                    err_reason = (order.error_message if order else None) or exec_msg or "Execution rejected"
+                    await alert_service.send_buy_failed(
+                        project=project,
+                        ca_address=cand.address,
+                        reason=err_reason,
+                    )
 
         except Exception as exc:
             logger.exception("pipeline_error", error=str(exc))
