@@ -22,6 +22,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
 )
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import settings
