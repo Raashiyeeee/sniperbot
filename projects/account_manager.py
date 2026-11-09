@@ -154,6 +154,46 @@ class AccountManager:
         logger.info("account_manager.x_set", project_id=project.id, handle=clean)
         return src
 
+    async def remove_x_account(
+        self,
+        project: Project,
+        operator_id: str,
+    ) -> Optional[str]:
+        """Remove X handle from active CA monitoring for this project."""
+        handle = project.official_x_handle
+        if not handle:
+            return None
+
+        clean = normalize_x_handle(handle)
+        approved_sources.clear_x_handle(clean)
+
+        project.official_x_handle = None
+        # If standalone X-monitored project, move to REJECTED so rapidapi stops polling
+        if not project.official_telegram:
+            project.status = ProjectStatus.REJECTED
+
+        project.updated_at = datetime.now(timezone.utc)
+
+        stmt = select(SourceAccount).where(
+            SourceAccount.platform == Platform.X,
+            SourceAccount.account_id == clean,
+        )
+        src = await self._session.scalar(stmt)
+        if src:
+            src.is_active = False
+
+        self._session.add(
+            AuditEvent(
+                actor=f"operator:{operator_id}",
+                action="official_x_removed",
+                entity_type="project",
+                entity_id=project.id,
+                reason=f"Removed official X @{clean} from monitoring",
+            )
+        )
+        logger.info("account_manager.x_removed", project_id=project.id, handle=clean)
+        return clean
+
     async def set_telegram_account(
         self,
         project: Project,

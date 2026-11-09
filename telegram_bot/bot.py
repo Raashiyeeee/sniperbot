@@ -90,6 +90,10 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("setaccounts", self._cmd_setaccounts))
         self._app.add_handler(CommandHandler("set_x", self._cmd_set_x))
         self._app.add_handler(CommandHandler("setx", self._cmd_set_x))
+        self._app.add_handler(CommandHandler("removex", self._cmd_remove_x))
+        self._app.add_handler(CommandHandler("remove_x", self._cmd_remove_x))
+        self._app.add_handler(CommandHandler("listx", self._cmd_list_x))
+        self._app.add_handler(CommandHandler("listaccounts", self._cmd_list_x))
         self._app.add_handler(CommandHandler("set_tg", self._cmd_set_tg))
         self._app.add_handler(CommandHandler("refresh_admins", self._cmd_refresh_admins))
         self._app.add_handler(CommandHandler("help_accounts", self._cmd_help_accounts))
@@ -481,16 +485,113 @@ class TelegramBot:
         if await self._require_operator(update) is None:
             return
         text = (
-            "Official account commands:\n\n"
-            "/set_x <project_id|ticker> @handle\n"
-            "/set_tg <project_id|ticker> @channel|-100chatid\n"
-            "/setaccounts <project_id|ticker> x:@handle tg:@channel\n"
-            "/refresh_admins <project_id|ticker>\n\n"
-            "After Accept, attach the official X and Telegram so CA monitoring "
-            "and auto-buy only trigger from those authorized sources."
+            "<b>Account Management Commands:</b>\n\n"
+            "• <code>/setx https://x.com/username</code> — Add X account to auto-CA monitoring & sniping\n"
+            "• <code>/removex @username</code> — Stop monitoring & remove account\n"
+            "• <code>/listx</code> — List all active monitored accounts\n"
+            "• <code>/set_tg &lt;project_id&gt; @channel</code> — Attach Telegram channel\n"
+            "• <code>/refresh_admins &lt;project_id&gt;</code> — Refresh authorized channel admins"
         )
         if update.effective_message:
-            await update.effective_message.reply_text(text)
+            await update.effective_message.reply_text(text, parse_mode="HTML")
+
+    async def _cmd_remove_x(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        operator_id = await self._require_operator(update)
+        if operator_id is None:
+            return
+        args = context.args or []
+        if not args:
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    "<b>Usage:</b>\n"
+                    "• <code>/removex https://x.com/username</code>\n"
+                    "• <code>/removex @username</code>\n"
+                    "• <code>/removex &lt;project_id|ticker&gt;</code>",
+                    parse_mode="HTML",
+                )
+            return
+
+        ref = args[0]
+        async with self._AsyncSessionLocal() as session:
+            mgr = AccountManager(session, bot=self.bot)
+            project = await mgr.resolve_project(ref)
+            if project is None:
+                if update.effective_message:
+                    await update.effective_message.reply_text("⚠️ No active project found for that handle or ID.")
+                return
+
+            removed_handle = await mgr.remove_x_account(project, operator_id=str(operator_id))
+            await session.commit()
+
+        display_handle = f"@{removed_handle}" if removed_handle else (project.name or "Project")
+        msg = (
+            f"🗑 <b>X Account Removed from Monitoring</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Account: <b>{display_handle}</b>\n"
+            f"Status: Stopped active CA monitoring\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"<i>The bot will no longer poll this account or execute buys for it.</i>"
+        )
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                msg,
+                parse_mode="HTML",
+            )
+
+    async def _cmd_list_x(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        operator_id = await self._require_operator(update)
+        if operator_id is None:
+            return
+
+        from sqlalchemy import select
+        async with self._AsyncSessionLocal() as session:
+            stmt = (
+                select(Project)
+                .where(
+                    Project.status.in_([ProjectStatus.APPROVED, ProjectStatus.CA_DETECTED]),
+                    Project.official_x_handle.isnot(None),
+                )
+                .order_by(Project.created_at.desc())
+            )
+            projects = (await session.execute(stmt)).scalars().all()
+
+        if not projects:
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    "ℹ️ No X accounts are currently being monitored.\n\n"
+                    "To start monitoring an account:\n"
+                    "<code>/setx https://x.com/username</code>",
+                    parse_mode="HTML",
+                )
+            return
+
+        lines = ["📋 <b>Active Monitored X Accounts:</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
+        for idx, p in enumerate(projects, 1):
+            h = p.official_x_handle or "n/a"
+            chain = (p.chain_id or "elysium").upper()
+            lines.append(
+                f"{idx}. <b>@{h}</b> (Chain: {chain})\n"
+                f"   ID: <code>{p.id}</code> | Status: {p.status.value}\n"
+                f"   Remove: <code>/removex @{h}</code>\n"
+            )
+
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("<i>To remove an account, tap its remove command above.</i>")
+
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                "\n".join(lines),
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
 
     async def _cmd_set_x(
         self,
