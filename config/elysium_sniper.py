@@ -40,7 +40,7 @@ class MonitoringConfig:
 @dataclass(frozen=True)
 class BuyConfig:
     buy_amount_hype: float = 1.0  # proposed default
-    max_slippage_pct: float = 5.0
+    max_slippage_pct: float = 3.0
     max_buy_tax_pct: float = 2.0
     min_liquidity_usd: float = 100.0
     gas_strategy: str = "dynamic_fast"  # market tip × multiplier

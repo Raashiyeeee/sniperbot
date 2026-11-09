@@ -129,7 +129,7 @@ class Settings(BaseSettings):
     emergency_sell_manual_only: bool = True
 
     # ── EVM (Robinhood / Elysium) execution defaults ──────────────
-    evm_max_slippage_pct: float = 5.0
+    evm_max_slippage_pct: float = 3.0
     evm_max_price_impact_pct: float = 5.0
     # Gas strategy: Dynamic / Fast → tip multiplier on market base
     evm_gas_strategy: str = "dynamic_fast"

@@ -57,6 +57,9 @@ class TelegramUserbotConnector:
             )
             return
 
+        if not self.settings.telegram_api_id:
+            return
+
         api_id = int(self.settings.telegram_api_id)
         api_hash = self.settings.telegram_api_hash.strip()
         session_str = self.settings.telegram_session_string.strip()
@@ -122,6 +125,28 @@ class TelegramUserbotConnector:
                         else "Unknown"
                     )
 
+                    # Admin & Moderator Verification (reject random member spam)
+                    is_admin = False
+                    if getattr(event, "is_channel", False) and not getattr(event, "is_group", False):
+                        # Broadcast channel posts are admin-only by definition
+                        is_admin = True
+                    else:
+                        try:
+                            perms = await self._client.get_permissions(chat, sender)
+                            is_admin = bool(perms.is_admin or perms.is_creator)
+                        except Exception:
+                            is_admin = False
+
+                    # Enforce strict admin check if configured
+                    if self.settings.ignore_non_admin_telegram_ca and not is_admin:
+                        logger.info(
+                            "telegram_userbot_non_admin_message_ignored",
+                            chat=chat_title,
+                            sender=sender_name,
+                            sender_id=sender_id,
+                        )
+                        return
+
                     payload = {
                         "id": f"tg_ub_{event.chat_id}_{event.id}",
                         "source": "telegram",
@@ -133,6 +158,7 @@ class TelegramUserbotConnector:
                         "author_id": sender_id,
                         "author_username": sender_username,
                         "author_name": sender_name,
+                        "is_admin": is_admin,
                         "is_forwarded": bool(getattr(event.message, "fwd_from", None)),
                         "message_id": event.id,
                         "created_at": (
@@ -172,3 +198,4 @@ class TelegramUserbotConnector:
         if self._client and self._client.is_connected():
             await self._client.disconnect()
         self._running = False
+

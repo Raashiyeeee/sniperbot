@@ -107,7 +107,7 @@ class CAResolver:
                 return False, "Missing Telegram sender ID"
 
             expected_chat = project.official_telegram_chat_id
-            if expected_chat and chat_id and str(chat_id) != str(expected_chat):
+            if expected_chat and chat_id and chat_id != expected_chat:
                 logger.warning(
                     "ca_source_rejected_wrong_telegram_chat",
                     expected=expected_chat,
@@ -142,7 +142,7 @@ class CAResolver:
                     "Use /set_tg and ensure the bot can read chat administrators."
                 )
 
-            if str(sender_id) not in allowed_ids:
+            if sender_id not in allowed_ids:
                 logger.warning(
                     "ca_source_rejected_unauthorized_tg_admin",
                     sender_id=sender_id,
