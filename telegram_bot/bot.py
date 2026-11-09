@@ -351,12 +351,15 @@ class TelegramBot:
         )
         session.add(approval)
 
-        blacklist_entry = BlacklistEntry(
-            project_id=project.id,
-            reason=f"Rejected by operator {operator_id}",
-            created_by=str(operator_id),
-        )
-        session.add(blacklist_entry)
+        stmt_bl = select(BlacklistEntry).where(BlacklistEntry.project_id == project.id)
+        existing_bl = await session.scalar(stmt_bl)
+        if not existing_bl:
+            blacklist_entry = BlacklistEntry(
+                project_id=project.id,
+                reason=f"Rejected by operator {operator_id}",
+                created_by=str(operator_id),
+            )
+            session.add(blacklist_entry)
 
         await self._write_audit(
             session=session,
