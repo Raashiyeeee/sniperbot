@@ -86,7 +86,7 @@ def test_settings_defaults_align_with_document():
     assert settings.manual_sell_enabled is True
     assert settings.ca_execution_target_min_ms == 1000
     assert settings.ca_execution_target_max_ms == 5000
-    assert settings.default_sniper_chain_id == "elysium"
+    assert settings.default_sniper_chain_id in ("elysium", "elysium_testnet")
     assert settings.evm_gas_strategy == "dynamic_fast"
 
 

@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     shortlist_dir: str = "config/shortlist"
     shortlist_preload_on_start: bool = True
 
-    # Default sniper chain (Ultra-Fast Sniper config)
+    # Default sniper chain (Ultra-Fast Sniper config: 'elysium_testnet' or 'elysium')
     default_sniper_chain_id: str = "elysium"
 
     # ── Monitoring (Elysium Ultra-Fast Sniper §2) ─────────────────

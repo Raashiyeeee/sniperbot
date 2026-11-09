@@ -94,6 +94,7 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("remove_x", self._cmd_remove_x))
         self._app.add_handler(CommandHandler("listx", self._cmd_list_x))
         self._app.add_handler(CommandHandler("listaccounts", self._cmd_list_x))
+        self._app.add_handler(CommandHandler("network", self._cmd_network))
         self._app.add_handler(CommandHandler("set_tg", self._cmd_set_tg))
         self._app.add_handler(CommandHandler("refresh_admins", self._cmd_refresh_admins))
         self._app.add_handler(CommandHandler("help_accounts", self._cmd_help_accounts))
@@ -485,7 +486,10 @@ class TelegramBot:
         if await self._require_operator(update) is None:
             return
         text = (
-            "<b>Account Management Commands:</b>\n\n"
+            "<b>Account & Network Management Commands:</b>\n\n"
+            "• <code>/network</code> — View active sniper network (Mainnet vs Testnet)\n"
+            "• <code>/network testnet</code> — Switch to Elysium Testnet (Chain 99801)\n"
+            "• <code>/network mainnet</code> — Switch to Elysium Mainnet (Chain 99901)\n"
             "• <code>/setx https://x.com/username</code> — Add X account to auto-CA monitoring & sniping\n"
             "• <code>/removex @username</code> — Stop monitoring & remove account\n"
             "• <code>/listx</code> — List all active monitored accounts\n"
@@ -593,6 +597,84 @@ class TelegramBot:
                 disable_web_page_preview=True,
             )
 
+    async def _cmd_network(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        operator_id = await self._require_operator(update)
+        if operator_id is None:
+            return
+
+        from config.chains import get_chain, resolve_rpc_url
+        from database.models import Project
+
+        args = context.args or []
+        if args:
+            sub = args[0].lower().strip()
+            if sub in ("testnet", "elysium_testnet", "test"):
+                target = "elysium_testnet"
+            elif sub in ("mainnet", "elysium", "live"):
+                target = "elysium"
+            else:
+                if update.effective_message:
+                    await update.effective_message.reply_text(
+                        "<b>Usage:</b>\n"
+                        "• <code>/network</code> — View current sniper network\n"
+                        "• <code>/network testnet</code> — Switch to Elysium Testnet (Chain 99801)\n"
+                        "• <code>/network mainnet</code> — Switch to Elysium Mainnet (Chain 99901)",
+                        parse_mode="HTML",
+                    )
+                return
+
+            settings.default_sniper_chain_id = target
+            chain_cfg = get_chain(target)
+            rpc = resolve_rpc_url(target)
+
+            # Update existing approved projects to the chosen chain
+            async with self._AsyncSessionLocal() as session:
+                stmt = select(Project).where(Project.status == ProjectStatus.APPROVED)
+                res = await session.execute(stmt)
+                projects = list(res.scalars().all())
+                for p in projects:
+                    p.chain_id = target
+                await session.commit()
+
+            msg = (
+                f"🔄 <b>Sniper Network Switched Successfully!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⛓ <b>Active Network:</b> {chain_cfg.display_name if chain_cfg else target.upper()}\n"
+                f"🆔 <b>Chain ID:</b> <code>{chain_cfg.evm_chain_id if chain_cfg else 'N/A'}</code>\n"
+                f"🌐 <b>RPC URL:</b> <code>{rpc}</code>\n"
+                f"🔍 <b>Explorer:</b> {chain_cfg.explorer_url if chain_cfg else 'N/A'}\n"
+                f"👤 <b>Updated Monitored Accounts:</b> {len(projects)}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🎯 <i>All future CA detections and monitored accounts will execute on this network.</i>"
+            )
+            if update.effective_message:
+                await update.effective_message.reply_text(msg, parse_mode="HTML")
+            return
+
+        current_chain = settings.default_sniper_chain_id or "elysium_testnet"
+        chain_cfg = get_chain(current_chain)
+        rpc = resolve_rpc_url(current_chain)
+
+        msg = (
+            f"🌐 <b>Current Sniper Network Status</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⛓ <b>Network:</b> {chain_cfg.display_name if chain_cfg else current_chain.upper()}\n"
+            f"🆔 <b>Chain ID:</b> <code>{chain_cfg.evm_chain_id if chain_cfg else 'N/A'}</code>\n"
+            f"💰 <b>Buy Amount:</b> {settings.elysium_buy_amount_hype} HYPE\n"
+            f"🌐 <b>RPC URL:</b> <code>{rpc}</code>\n"
+            f"🔍 <b>Explorer:</b> {chain_cfg.explorer_url if chain_cfg else 'N/A'}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💡 <i>To switch networks:</i>\n"
+            f"• <code>/network testnet</code> — Switch to Elysium Testnet\n"
+            f"• <code>/network mainnet</code> — Switch to Elysium Mainnet"
+        )
+        if update.effective_message:
+            await update.effective_message.reply_text(msg, parse_mode="HTML")
+
     async def _cmd_set_x(
         self,
         update: Update,
@@ -633,7 +715,7 @@ class TelegramBot:
                         name=f"@{clean_handle}",
                         ticker=None,
                         official_x_handle=clean_handle,
-                        chain_id=settings.default_sniper_chain_id or "elysium",
+                        chain_id=settings.default_sniper_chain_id or "elysium_testnet",
                         status=ProjectStatus.APPROVED,
                         is_shortlisted=True,
                         score=100.0,
@@ -646,12 +728,14 @@ class TelegramBot:
                 else:
                     if project.status not in (ProjectStatus.APPROVED, ProjectStatus.CA_DETECTED, ProjectStatus.PURCHASED):
                         project.status = ProjectStatus.APPROVED
+                    # Sync chain_id to active sniper network
+                    project.chain_id = settings.default_sniper_chain_id or "elysium_testnet"
 
                 await mgr.set_x_account(project, clean_handle, operator_id=str(operator_id))
                 await session.commit()
 
             buy_hype = settings.elysium_buy_amount_hype
-            chain_label = (project.chain_id or "elysium").upper()
+            chain_label = (project.chain_id or "elysium_testnet").upper()
             msg = (
                 f"✅ <b>X Account Added for Fast CA Monitoring</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"

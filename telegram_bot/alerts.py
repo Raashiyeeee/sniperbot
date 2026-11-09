@@ -384,9 +384,15 @@ class AlertService:
         fee = order.fee_spent or 0.0
         route = order.route or "Launchpad / DEX Route"
 
+        chain_key = (project.chain_id or "").lower()
+        if "testnet" in chain_key or "testnet" in chain.lower():
+            base_explorer = "https://explorer-elysium-testnet.t.conduit.xyz"
+        else:
+            base_explorer = "https://elysiumexplore.com"
+
         explorer_link = (
-            f"https://elysiumexplore.com/tx/{tx_hash}"
-            if "ELYSIUM" in chain and tx_hash.startswith("0x") and len(tx_hash) > 10
+            f"{base_explorer}/tx/{tx_hash}"
+            if tx_hash.startswith("0x") and len(tx_hash) > 10
             else None
         )
 

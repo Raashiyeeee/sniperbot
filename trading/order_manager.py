@@ -208,7 +208,10 @@ class OrderManager:
         if chain_id == "solana":
             exec_res = await self.sol_exec.execute_buy(quote)
         elif is_evm_chain(chain_id):
-            exec_res = await self.evm_exec.execute_buy(quote)
+            exec_res = await self.evm_exec.execute_buy(
+                quote,
+                router_address=buy_plan.router_contract,
+            )
         else:
             msg = f"Unsupported chain for execution: {chain_id}"
             logger.error("buy_blocked_unsupported_chain", chain_id=chain_id)
