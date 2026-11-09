@@ -554,8 +554,8 @@ async def run_pipeline(
 async def main() -> None:
     logger.info("launch_radar_sniper_bot_starting", env=settings.app_env, version="3.1.0")
 
-    if settings.app_env == "development":
-        await create_tables()
+    # Ensure tables exist across development, paper, and live environments (idempotent create_all)
+    await create_tables()
 
     # Preload shortlisted project docs (source of truth), then hydrate monitoring registry
     async with AsyncSessionLocal() as session:
