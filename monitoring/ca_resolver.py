@@ -67,6 +67,7 @@ class CAResolver:
         is_forwarded: bool,
         source_account_id: Optional[str] = None,
         chat_id: Optional[str] = None,
+        is_admin_verified: bool = False,
     ) -> Tuple[bool, str]:
         """
         Verify that the message sender is an authorized source.
@@ -99,6 +100,9 @@ class CAResolver:
             return True, "Official X account verified"
 
         elif platform == "telegram":
+            if is_admin_verified:
+                return True, "Telegram admin verified by Userbot"
+
             if not sender_id:
                 return False, "Missing Telegram sender ID"
 
@@ -165,6 +169,7 @@ class CAResolver:
         is_forwarded: bool = False,
         source_account_id: Optional[str] = None,
         chat_id: Optional[str] = None,
+        is_admin_verified: bool = False,
     ) -> Tuple[Optional[ContractCandidate], str]:
         """
         Full CA processing pipeline:
@@ -191,6 +196,7 @@ class CAResolver:
             is_forwarded,
             source_account_id,
             chat_id=chat_id,
+            is_admin_verified=is_admin_verified,
         )
         if not is_auth:
             return None, f"Source verification failed: {auth_msg}"

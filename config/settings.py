@@ -7,7 +7,7 @@ All risk limits are configurable here — never hardcode them.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -193,6 +193,13 @@ class Settings(BaseSettings):
     @property
     def is_paper(self) -> bool:
         return self.app_env == "paper"
+
+    @field_validator("telegram_api_id", mode="before")
+    @classmethod
+    def parse_telegram_api_id(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or (isinstance(v, str) and not v.strip()):
+            return None
+        return int(v)
 
     @field_validator("app_env")
     @classmethod

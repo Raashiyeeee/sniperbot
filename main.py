@@ -340,6 +340,7 @@ async def process_message(
                     is_forwarded=message.get("is_forwarded", False),
                     source_account_id=source_account_id,
                     chat_id=str(message.get("chat_id")) if message.get("chat_id") is not None else None,
+                    is_admin_verified=message.get("is_admin", False),
                 )
                 await session.commit()
 
