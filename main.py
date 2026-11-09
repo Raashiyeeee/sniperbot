@@ -190,24 +190,48 @@ async def process_message(
 
             # If candidate is not already an APPROVED project:
             if existing_project is None or existing_project.status == ProjectStatus.PENDING_APPROVAL:
-                # 1. Require target keywords: "CA soon" or "contract dropping soon" (bare "contract dropping" removed)
-                if not DISCOVERY_KEYWORDS_RE.search(text):
-                    logger.debug("unapproved_candidate_ignored_lacks_discovery_keywords", text=text[:100])
-                    return
+                # Direct Telegram CA drop: if a valid CA is present in a Telegram message, auto-promote to APPROVED!
+                if platform == "telegram" and parsed.ca_address:
+                    chat_title = message.get("chat_title") or f"TG-{message.get('chat_id')}"
+                    if existing_project is None:
+                        existing_project = Project(
+                            id=str(uuid.uuid4()),
+                            name=chat_title,
+                            ticker=parsed.ticker,
+                            ca_address=parsed.ca_address,
+                            chain_id=settings.default_sniper_chain_id or "elysium",
+                            status=ProjectStatus.APPROVED,
+                            official_telegram_chat_id=message.get("chat_id"),
+                            score=100.0,
+                            created_at=datetime.now(timezone.utc),
+                            updated_at=datetime.now(timezone.utc),
+                        )
+                        session.add(existing_project)
+                        await session.flush()
+                        logger.info("telegram_ca_auto_approved", project_id=existing_project.id, chat=chat_title, ca=parsed.ca_address)
+                    else:
+                        existing_project.status = ProjectStatus.APPROVED
+                        existing_project.ca_address = parsed.ca_address
+                        await session.flush()
+                else:
+                    # 1. Require target keywords: "CA soon" or "contract dropping soon" (bare "contract dropping" removed)
+                    if not DISCOVERY_KEYWORDS_RE.search(text):
+                        logger.debug("unapproved_candidate_ignored_lacks_discovery_keywords", text=text[:100])
+                        return
 
-                # 2. Require post to be from official project page (not bystander shill or influencer account)
-                is_official, official_reason = official_filter.evaluate(
-                    text=text,
-                    author_handle=message.get("author_id"),
-                    author_name=message.get("author_name"),
-                    author_bio=message.get("author_bio"),
-                )
-                if not is_official:
-                    logger.info("non_official_post_ignored", handle=message.get("author_id"), reason=official_reason)
-                    return
+                    # 2. Require post to be from official project page (not bystander shill or influencer account)
+                    is_official, official_reason = official_filter.evaluate(
+                        text=text,
+                        author_handle=message.get("author_id"),
+                        author_name=message.get("author_name"),
+                        author_bio=message.get("author_bio"),
+                    )
+                    if not is_official:
+                        logger.info("non_official_post_ignored", handle=message.get("author_id"), reason=official_reason)
+                        return
 
             ai_result = None
-            if existing_project is None or existing_project.status == ProjectStatus.PENDING_APPROVAL:
+            if (existing_project is None or existing_project.status == ProjectStatus.PENDING_APPROVAL) and not (platform == "telegram" and parsed.ca_address):
                 # Stage 2: Gemini AI Evaluation & Verification
                 ai_result = await project_evaluator.evaluate_project(
                     post_text=text,

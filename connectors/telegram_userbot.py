@@ -29,6 +29,7 @@ class TelegramUserbotConnector:
         self.queue = queue
         self.settings = get_settings()
         self._client: Any = None
+        self._me_id: Optional[int] = None
         self._running = False
         self._stop_event = asyncio.Event()
 
@@ -78,6 +79,7 @@ class TelegramUserbotConnector:
                 return
 
             me = await self._client.get_me()
+            self._me_id = me.id
             username = getattr(me, "username", None) or "Anonymous"
             logger.info("telegram_userbot_authorized", account_id=me.id, username=f"@{username}")
 
@@ -127,15 +129,27 @@ class TelegramUserbotConnector:
 
                     # Admin & Moderator Verification (reject random member spam)
                     is_admin = False
-                    if getattr(event, "is_channel", False) and not getattr(event, "is_group", False):
+                    if self._me_id and event.sender_id == self._me_id:
+                        # User's own account is always authorized (essential for manual test drops)
+                        is_admin = True
+                    elif getattr(event, "is_channel", False) and not getattr(event, "is_group", False):
                         # Broadcast channel posts are admin-only by definition
                         is_admin = True
                     else:
                         try:
                             perms = await self._client.get_permissions(chat, sender)
-                            is_admin = bool(perms.is_admin or perms.is_creator)
+                            is_admin = bool(getattr(perms, "is_admin", False) or getattr(perms, "is_creator", False))
                         except Exception:
                             is_admin = False
+
+                        if not is_admin:
+                            try:
+                                if getattr(chat, "creator", False):
+                                    is_admin = True
+                                elif getattr(chat, "admin_rights", None):
+                                    is_admin = True
+                            except Exception:
+                                pass
 
                     # Enforce strict admin check if configured
                     if self.settings.ignore_non_admin_telegram_ca and not is_admin:

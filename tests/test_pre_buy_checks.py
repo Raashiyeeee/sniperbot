@@ -40,17 +40,17 @@ class TestTaxChecker:
 
     def test_buy_tax_above_limit_fails(self):
         checker = TaxChecker()
-        # Buy 2.5% > 2.0%
-        result = checker.evaluate_taxes(sim_buy_tax=2.5, sim_sell_tax=1.0)
+        # Buy 3.5% > 3.0%
+        result = checker.evaluate_taxes(sim_buy_tax=3.5, sim_sell_tax=1.0)
         assert result.status == CheckResult.FAIL
-        assert "Buy tax 2.5% exceeds max 2.0%" in result.message
+        assert "Buy tax 3.5% exceeds max 3.0%" in result.message
 
     def test_sell_tax_above_limit_fails(self):
         checker = TaxChecker()
-        # Sell 5.0% > 2.0%
+        # Sell 5.0% > 3.0%
         result = checker.evaluate_taxes(sim_buy_tax=1.0, sim_sell_tax=5.0)
         assert result.status == CheckResult.FAIL
-        assert "Sell tax 5.0% exceeds max 2.0%" in result.message
+        assert "Sell tax 5.0% exceeds max 3.0%" in result.message
 
     def test_reconciliation_uses_higher_value(self):
         checker = TaxChecker()
