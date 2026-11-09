@@ -75,7 +75,7 @@ def test_settings_defaults_align_with_document():
         _env_file=None,  # type: ignore[call-arg]
         app_env="development",
     )
-    assert settings.elysium_buy_amount_hype == 0.08
+    assert settings.elysium_buy_amount_hype == 0.05
     assert settings.max_buy_tax_pct == 2.0
     assert settings.evm_max_slippage_pct == 5.0
     assert settings.min_qualifying_volume_usd == 100.0

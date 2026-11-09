@@ -101,8 +101,8 @@ class Settings(BaseSettings):
     duplicate_ca_detection_enabled: bool = True
 
     # ── Risk / buy limits (Elysium Ultra-Fast Sniper §3) ──────────
-    # Buy amount in HYPE per trade (configured to 0.08 HYPE)
-    elysium_buy_amount_hype: float = 0.08
+    # Buy amount in HYPE per trade (configured to 0.05 HYPE)
+    elysium_buy_amount_hype: float = 0.05
     hype_usd_price: float = 1.0  # used to map HYPE buys into USD risk caps
     max_buy_tax_pct: float = 2.0
     max_sell_tax_pct: float = 2.0
