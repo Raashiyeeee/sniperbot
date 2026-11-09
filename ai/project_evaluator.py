@@ -39,7 +39,7 @@ from config.settings import get_settings
 
 logger = structlog.get_logger(__name__)
 
-SYSTEM_PROMPT = """You are an expert crypto research analyst and security auditor specializing in early-stage Web3 project discovery on Solana and Robinhood Chain (EVM).
+SYSTEM_PROMPT = """You are an expert crypto research analyst and security auditor specializing in early-stage Web3 project discovery on Solana, Robinhood Chain (EVM), and Elysium (EVM, HYPE).
 
 YOUR OBJECTIVE:
 Evaluate early-stage project announcements to determine if a project is a legitimate, high-utility crypto project with an officially confirmed upcoming token launch or TGE, or if it is low-quality, a rug/scam, an impersonator, or an ordinary update.
@@ -65,7 +65,7 @@ CRITICAL SECURITY RULES:
 SCORING GUIDELINES (each sub-score 0 to 100):
 - product_analysis.utility_score: Real functional product/demo/docs vs empty promises.
 - credibility_analysis.credibility_score: Identifiable team, verified domain, consistent history.
-- credibility_analysis.ecosystem_score: Real presence on Solana or Robinhood Chain.
+- credibility_analysis.ecosystem_score: Real presence on Solana, Robinhood Chain, or Elysium.
 - social_analysis.account_credibility_score: Genuine project account vs throwaway or purchased account.
 - social_analysis.community_quality_score: Organic replies and discussions vs repetitive bot spam.
 - announcement_analysis.confirmation_score: Clear, official confirmation of token launch date/time or CA drop.
@@ -212,7 +212,7 @@ class ProjectEvaluator:
             "post_url": post_url or "Unknown",
             "candidate_project_name": extracted_name or "Unknown",
             "candidate_ticker": extracted_ticker or "Unknown",
-            "candidate_chain": extracted_chain or "Solana or Robinhood Chain",
+            "candidate_chain": extracted_chain or "Solana, Robinhood Chain, or Elysium",
             "post_text": post_text,
             "schema_contract": {
                 "project": {
@@ -220,7 +220,7 @@ class ProjectEvaluator:
                     "ticker": "string or null",
                     "primary_category": "Gaming | Staking | Trading | Launchpads | DeFi | Utility | Creator Platforms | Infrastructure | Other",
                     "categories": ["string"],
-                    "blockchain": "Solana | Robinhood Chain | Unknown",
+                    "blockchain": "Solana | Robinhood Chain | Elysium | Elysium Testnet | Unknown",
                     "website_url": "string or null",
                     "official_x_handle": "string or null",
                     "official_telegram": "string or null",
@@ -389,7 +389,12 @@ class ProjectEvaluator:
 
         # Blockchain
         chain = BlockchainType.SOLANA
-        if extracted_chain and "robinhood" in extracted_chain.lower():
+        extracted_lower = (extracted_chain or "").lower()
+        if "elysium_testnet" in extracted_lower or "elysium testnet" in text_lower:
+            chain = BlockchainType.ELYSIUM_TESTNET
+        elif "elysium" in extracted_lower or "elysium" in text_lower:
+            chain = BlockchainType.ELYSIUM
+        elif "robinhood" in extracted_lower:
             chain = BlockchainType.ROBINHOOD_CHAIN
         elif "robinhood" in text_lower or "evm" in text_lower:
             chain = BlockchainType.ROBINHOOD_CHAIN

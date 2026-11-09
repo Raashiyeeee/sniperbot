@@ -139,8 +139,10 @@ class Project(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     official_x_handle: Mapped[Optional[str]] = mapped_column(String(256))
     official_telegram: Mapped[Optional[str]] = mapped_column(String(256))
+    # Numeric Telegram chat id for the official group/channel (e.g. -100123...)
+    official_telegram_chat_id: Mapped[Optional[str]] = mapped_column(String(64))
     website_url: Mapped[Optional[str]] = mapped_column(String(1024))
-    chain_id: Mapped[Optional[str]] = mapped_column(String(64))    # "robinhood" | "solana"
+    chain_id: Mapped[Optional[str]] = mapped_column(String(64))    # "robinhood" | "solana" | "elysium" | "elysium_testnet"
     ca_address: Mapped[Optional[str]] = mapped_column(String(256))
     expected_launch_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     expected_ca_time_str: Mapped[Optional[str]] = mapped_column(String(256), default="Not specified")
@@ -167,6 +169,16 @@ class Project(Base):
     product_summary: Mapped[Optional[str]] = mapped_column(Text)
     documentation_url: Mapped[Optional[str]] = mapped_column(String(1024))
     ecosystem_links: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, default=dict)
+
+    # ── Elysium sniper documentation (source of truth) ──────────────
+    is_shortlisted: Mapped[bool] = mapped_column(Boolean, default=False)
+    launchpad: Mapped[Optional[str]] = mapped_column(String(64))  # boxa | kleos | eleos | elyspump | ascend | uniswap_v4
+    launch_mechanism: Mapped[Optional[str]] = mapped_column(String(64))  # bonding_curve | liquidity_pool | uniswap_v4
+    router_contract: Mapped[Optional[str]] = mapped_column(String(256))
+    pool_manager: Mapped[Optional[str]] = mapped_column(String(256))
+    hook_address: Mapped[Optional[str]] = mapped_column(String(256))
+    quote_asset: Mapped[Optional[str]] = mapped_column(String(256))  # native HYPE or token address
+    sniper_config: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, default=dict)
 
     # Identity keys for deduplication
     identity_keys: Mapped[Optional[dict]] = mapped_column(JSON_TYPE, default=dict)

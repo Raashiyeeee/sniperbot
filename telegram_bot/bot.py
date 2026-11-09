@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import structlog
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -18,6 +18,7 @@ from telegram.ext import (
     Application,
     ApplicationBuilder,
     CallbackQueryHandler,
+    CommandHandler,
     ContextTypes,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +32,7 @@ from database.models import (
     Project,
     ProjectStatus,
 )
+from projects.account_manager import AccountManager
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -80,10 +82,15 @@ class TelegramBot:
     # ------------------------------------------------------------------
 
     def _register_handlers(self) -> None:
-        """Attach callback-query handlers to the Application."""
+        """Attach callback-query and command handlers to the Application."""
         self._app.add_handler(
             CallbackQueryHandler(self._dispatch_callback, pattern=r"^(approve|reject|details|noop)(:.*)?$")
         )
+        self._app.add_handler(CommandHandler("setaccounts", self._cmd_setaccounts))
+        self._app.add_handler(CommandHandler("set_x", self._cmd_set_x))
+        self._app.add_handler(CommandHandler("set_tg", self._cmd_set_tg))
+        self._app.add_handler(CommandHandler("refresh_admins", self._cmd_refresh_admins))
+        self._app.add_handler(CommandHandler("help_accounts", self._cmd_help_accounts))
 
     # ------------------------------------------------------------------
     # Dispatch & authorisation
@@ -211,8 +218,11 @@ class TelegramBot:
                 "Official Handle: @StarTokenDev\n"
                 "Profile:         https://x.com/StarTokenDev\n"
                 f"Max Buy Tax:     {settings.max_buy_tax_pct}%\n"
-                f"Min Pool Volume: ${settings.min_qualifying_volume_usd}\n"
-                "Target Execution: < 2.0s\n"
+                f"Max Slippage:    {settings.evm_max_slippage_pct}%\n"
+                f"Buy Amount:      {settings.elysium_buy_amount_hype} HYPE\n"
+                f"Min Liquidity:   ${settings.min_qualifying_volume_usd}\n"
+                f"Target Execution: {settings.ca_execution_target_min_ms}-{settings.ca_execution_target_max_ms}ms\n"
+                "Selling:         Manual only (TP/SL/auto OFF)\n"
             )
             chat_to_reply = update.effective_chat or (query.message.chat if query.message else None)
             if chat_to_reply:
@@ -262,17 +272,35 @@ class TelegramBot:
             detail=f"Project '{project.name}' approved by operator {operator_id}",
         )
 
+        # Register any already-known official accounts for continuous monitoring
+        acct_mgr = AccountManager(session, bot=self.bot)
+        try:
+            await acct_mgr.bootstrap_from_project(project, str(operator_id))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("approve_account_bootstrap_failed", error=str(exc))
+
         await session.commit()
 
+        x_handle = f"@{project.official_x_handle}" if project.official_x_handle else "not set"
+        tg_ref = (
+            project.official_telegram_chat_id
+            or (f"@{project.official_telegram}" if project.official_telegram else "not set")
+        )
         # Update Telegram message visibly
         new_text = (
             "✅ LAUNCH APPROVED — MONITORING FOR CA\n\n"
             f"Project:       {project.name or 'Unknown'} ({project.ticker or 'N/A'})\n"
             f"Chain:         {project.chain_id or 'Unknown'}\n"
             f"Status:        APPROVED\n"
-            f"Operator:      {operator_id}\n\n"
+            f"Operator:      {operator_id}\n"
+            f"Official X:    {x_handle}\n"
+            f"Official TG:   {tg_ref}\n\n"
             "🔍 Official channels are now actively monitored for CA drop.\n"
-            "Fast-path buy will trigger automatically upon validation."
+            "Fast-path buy will trigger automatically upon validation.\n\n"
+            "Attach / update official accounts:\n"
+            f"/set_x {project.id} @OfficialHandle\n"
+            f"/set_tg {project.id} @channel_or_-100chatid\n"
+            f"/setaccounts {project.id} x:@handle tg:@channel"
         )
         approved_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("📋 DETAILS", callback_data=f"details:{project.id}")]
@@ -372,6 +400,8 @@ class TelegramBot:
             f"Recommendation:  {project.ai_recommendation or 'N/A'}\n"
             f"Website:         {project.website_url or 'N/A'}\n"
             f"Official X:      {project.official_x_handle or 'N/A'}\n"
+            f"Official TG:     {project.official_telegram or 'N/A'}\n"
+            f"TG Chat ID:      {project.official_telegram_chat_id or 'N/A'}\n"
             f"Expected launch: {project.expected_launch_at or project.launch_time_str or 'Not stated'}\n"
             f"CA Expected:     {project.expected_ca_time_str or 'Not stated'}\n"
             f"Blacklisted:     {project.is_blacklisted}\n"
@@ -428,6 +458,208 @@ class TelegramBot:
                 )
         except Exception as exc:
             self._log.warning("failed_to_edit_message", error=str(exc))
+
+    # ------------------------------------------------------------------
+    # Account attachment commands
+    # ------------------------------------------------------------------
+
+    async def _require_operator(self, update: Update) -> Optional[int]:
+        user = update.effective_user
+        if user is None or user.id not in settings.operator_ids:
+            if update.effective_message:
+                await update.effective_message.reply_text("⛔ Unauthorized")
+            return None
+        return user.id
+
+    async def _cmd_help_accounts(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        if await self._require_operator(update) is None:
+            return
+        text = (
+            "Official account commands:\n\n"
+            "/set_x <project_id|ticker> @handle\n"
+            "/set_tg <project_id|ticker> @channel|-100chatid\n"
+            "/setaccounts <project_id|ticker> x:@handle tg:@channel\n"
+            "/refresh_admins <project_id|ticker>\n\n"
+            "After Accept, attach the official X and Telegram so CA monitoring "
+            "and auto-buy only trigger from those authorized sources."
+        )
+        if update.effective_message:
+            await update.effective_message.reply_text(text)
+
+    async def _cmd_set_x(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        operator_id = await self._require_operator(update)
+        if operator_id is None:
+            return
+        args = context.args or []
+        if len(args) < 2:
+            if update.effective_message:
+                await update.effective_message.reply_text("Usage: /set_x <project_id|ticker> @handle")
+            return
+        await self._apply_account_update(
+            update,
+            operator_id,
+            project_ref=args[0],
+            x_handle=args[1],
+            telegram_ref=None,
+        )
+
+    async def _cmd_set_tg(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        operator_id = await self._require_operator(update)
+        if operator_id is None:
+            return
+        args = context.args or []
+        if len(args) < 2:
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    "Usage: /set_tg <project_id|ticker> @channel_or_-100chatid"
+                )
+            return
+        await self._apply_account_update(
+            update,
+            operator_id,
+            project_ref=args[0],
+            x_handle=None,
+            telegram_ref=args[1],
+        )
+
+    async def _cmd_setaccounts(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        operator_id = await self._require_operator(update)
+        if operator_id is None:
+            return
+        args = context.args or []
+        if len(args) < 2:
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    "Usage: /setaccounts <project_id|ticker> x:@handle tg:@channel"
+                )
+            return
+
+        project_ref = args[0]
+        x_handle = None
+        telegram_ref = None
+        for token in args[1:]:
+            lower = token.lower()
+            if lower.startswith("x:"):
+                x_handle = token.split(":", 1)[1]
+            elif lower.startswith("tg:"):
+                telegram_ref = token.split(":", 1)[1]
+            elif token.startswith("@"):
+                # Ambiguous bare @ — treat as X if x not set else TG
+                if x_handle is None:
+                    x_handle = token
+                else:
+                    telegram_ref = token
+            elif token.startswith("-") or token.isdigit():
+                telegram_ref = token
+
+        if not x_handle and not telegram_ref:
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    "Provide x:@handle and/or tg:@channel (or chat id)."
+                )
+            return
+
+        await self._apply_account_update(
+            update,
+            operator_id,
+            project_ref=project_ref,
+            x_handle=x_handle,
+            telegram_ref=telegram_ref,
+        )
+
+    async def _cmd_refresh_admins(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        operator_id = await self._require_operator(update)
+        if operator_id is None:
+            return
+        args = context.args or []
+        if len(args) < 1:
+            if update.effective_message:
+                await update.effective_message.reply_text("Usage: /refresh_admins <project_id|ticker>")
+            return
+
+        async with self._AsyncSessionLocal() as session:
+            mgr = AccountManager(session, bot=self.bot)
+            project = await mgr.resolve_project(args[0])
+            if project is None:
+                if update.effective_message:
+                    await update.effective_message.reply_text("⚠️ Project not found.")
+                return
+            try:
+                admins = await mgr.refresh_telegram_admins(project, str(operator_id))
+                await session.commit()
+            except Exception as exc:  # noqa: BLE001
+                if update.effective_message:
+                    await update.effective_message.reply_text(f"⚠️ Failed: {exc}")
+                return
+
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                f"✅ Refreshed {len(admins)} Telegram admin(s) for "
+                f"{project.name or project.ticker or project.id}."
+            )
+
+    async def _apply_account_update(
+        self,
+        update: Update,
+        operator_id: int,
+        project_ref: str,
+        x_handle: Optional[str],
+        telegram_ref: Optional[str],
+    ) -> None:
+        async with self._AsyncSessionLocal() as session:
+            mgr = AccountManager(session, bot=self.bot)
+            project = await mgr.resolve_project(project_ref)
+            if project is None:
+                if update.effective_message:
+                    await update.effective_message.reply_text("⚠️ Project not found.")
+                return
+            try:
+                await mgr.set_accounts(
+                    project,
+                    operator_id=str(operator_id),
+                    x_handle=x_handle,
+                    telegram_ref=telegram_ref,
+                )
+                await session.commit()
+            except Exception as exc:  # noqa: BLE001
+                await session.rollback()
+                if update.effective_message:
+                    await update.effective_message.reply_text(f"⚠️ Failed: {exc}")
+                return
+
+            x_str = f"@{project.official_x_handle}" if project.official_x_handle else "unchanged"
+            tg_str = (
+                project.official_telegram_chat_id
+                or (f"@{project.official_telegram}" if project.official_telegram else "unchanged")
+            )
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    "✅ Official accounts updated\n"
+                    f"Project: {project.name or project.ticker or project.id}\n"
+                    f"X: {x_str}\n"
+                    f"TG: {tg_str}\n"
+                    "Monitoring is active for these sources only."
+                )
 
     # ------------------------------------------------------------------
     # Helpers

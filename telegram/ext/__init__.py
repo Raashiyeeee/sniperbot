@@ -12,14 +12,21 @@ import httpx
 class ContextTypes:
     class DEFAULT_TYPE:
         error: Optional[Exception] = None
+        args: Optional[List[str]] = None
 
-        def __init__(self, error: Optional[Exception] = None) -> None:
+        def __init__(
+            self,
+            error: Optional[Exception] = None,
+            args: Optional[List[str]] = None,
+        ) -> None:
             self.error = error
+            self.args = args
 
 
 class _Filters:
     ALL = object()
     TEXT = object()
+    COMMAND = object()
 
 
 filters = _Filters()
@@ -29,6 +36,17 @@ class CallbackQueryHandler:
     def __init__(self, callback: Callable[..., Any], pattern: Optional[str] = None) -> None:
         self.callback = callback
         self.pattern = re.compile(pattern) if pattern else None
+
+
+class CommandHandler:
+    def __init__(
+        self,
+        command: str,
+        callback: Callable[..., Any],
+        **kwargs: Any,
+    ) -> None:
+        self.command = command.lstrip("/").lower()
+        self.callback = callback
 
 
 class MessageHandler:
@@ -176,10 +194,20 @@ class _Updater:
                 message=msg if not is_post else None,
                 channel_post=msg if is_post else None,
             )
-            context = ContextTypes.DEFAULT_TYPE()
-            for h in self._app.handlers:
-                if isinstance(h, MessageHandler):
-                    asyncio.create_task(h.callback(update, context))
+            text = (msg.text or "").strip()
+            if text.startswith("/"):
+                cmd_token = text[1:].split()[0].split("@", 1)[0].lower()
+                args = text.split()[1:]
+                context = ContextTypes.DEFAULT_TYPE(args=args)
+                for h in self._app.handlers:
+                    if isinstance(h, CommandHandler) and h.command == cmd_token:
+                        asyncio.create_task(h.callback(update, context))
+                        break
+            else:
+                context = ContextTypes.DEFAULT_TYPE()
+                for h in self._app.handlers:
+                    if isinstance(h, MessageHandler):
+                        asyncio.create_task(h.callback(update, context))
 
 
 class ApplicationBuilder:

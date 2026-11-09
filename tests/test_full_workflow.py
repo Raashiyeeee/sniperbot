@@ -5,7 +5,7 @@ Complete End-to-End Simulation of Spec v3.1 across all phases:
   Phase 1: Project Launch Detection (starts in PENDING_APPROVAL)
   Phase 2: Telegram Operator Approval (transitions to APPROVED)
   Phase 3: Official CA Announcement Received (transitions to CA_DETECTED)
-  Phase 4: Pre-Buy Checks (3% Tax Gate, $100 Genuine Volume Snapshot, Honeypot Check)
+  Phase 4: Pre-Buy Checks (2% Tax Gate, $100 Genuine Volume Snapshot, Honeypot Check)
   Phase 5 & 6: Rapid Fast-Path Buy Execution (< 2s) -> Order FILLED & Position OPENED (transitions to PURCHASED)
 """
 from __future__ import annotations
@@ -130,7 +130,7 @@ def test_complete_end_to_end_sniper_workflow():
             # PHASE 4: Pre-Buy Checks (Tax, Volume Snapshot, Security)
             # ─────────────────────────────────────────────────────────────
             tax_checker = TaxChecker()
-            # Buy tax 1.5% <= 3.0%, Sell tax 2.0% <= 3.0%
+            # Buy tax 1.5% <= 2.0%, Sell tax 2.0% <= 2.0%
             tax_res = tax_checker.evaluate_taxes(sim_buy_tax=1.5, sim_sell_tax=2.0)
             assert tax_res.status == CheckResult.PASS
 
@@ -197,7 +197,7 @@ def test_complete_end_to_end_sniper_workflow():
 
 
 def test_pre_buy_tax_failure_blocks_execution():
-    """Verify that if tax exceeds 3.0%, project is blocked and no buy occurs."""
+    """Verify that if tax exceeds 2.0%, project is blocked and no buy occurs."""
     async def _test():
         engine, session = await _setup_session()
         try:
@@ -237,7 +237,7 @@ def test_pre_buy_tax_failure_blocks_execution():
             await session.commit()
             assert project.status == ProjectStatus.CA_DETECTED
 
-            # Pre-buy tax check fails (4.5% > 3.0%)
+            # Pre-buy tax check fails (4.5% > 2.0%)
             tax_checker = TaxChecker()
             tax_res = tax_checker.evaluate_taxes(sim_buy_tax=4.5, sim_sell_tax=1.0)
             assert tax_res.status == CheckResult.FAIL

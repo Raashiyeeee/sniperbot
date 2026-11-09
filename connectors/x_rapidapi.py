@@ -92,41 +92,59 @@ class XRapidAPIConnector:
             logger.debug("x_rapidapi.get_approved_handles_error", error=str(exc))
             return []
 
+    async def _poll_approved_handles_once(self) -> None:
+        """High-priority poll of approved official X accounts only."""
+        if not self._session_factory:
+            return
+        approved_handles = await self._get_approved_handles()
+        for handle in approved_handles:
+            if not self._running:
+                break
+            try:
+                await self._fetch_search_query(f"from:{handle}")
+            except Exception as exc:
+                logger.warning("x_rapidapi.approved_handle_failed", handle=handle, error=str(exc))
+            await asyncio.sleep(0.25)
+
     async def _poll_loop(self) -> None:
-        """Continuous polling loop: polls discovery queries + approved project handles."""
+        """Continuous polling loop: discovery queries + fast approved-handle scans."""
         queries = [q.strip() for q in self._settings.rapidapi_search_queries.split(",") if q.strip()]
         if not queries:
             queries = ['"CA soon" OR "contract dropping" OR "contract dropping soon"']
 
-        while self._running:
-            # 1. Global Discovery Scan across X for new projects with high-intent CA keywords
-            for query in queries:
-                if not self._running:
-                    break
-                try:
-                    await self._fetch_search_query(query)
-                except Exception as exc:
-                    logger.warning("x_rapidapi.query_failed", query=query, error=str(exc))
-                await asyncio.sleep(1.0)
+        discovery_interval = max(5.0, float(self._settings.rapidapi_poll_interval_seconds))
+        approved_interval = max(
+            1.0,
+            float(getattr(self._settings, "rapidapi_approved_poll_interval_seconds", 3.0)),
+        )
+        last_discovery = 0.0
 
-            # 2. Targeted High-Priority Scan for all APPROVED projects
-            if self._session_factory:
-                approved_handles = await self._get_approved_handles()
-                for handle in approved_handles:
+        while self._running:
+            now = asyncio.get_event_loop().time()
+
+            # 1. Global discovery on a slower cadence
+            if (now - last_discovery) >= discovery_interval:
+                for query in queries:
                     if not self._running:
                         break
                     try:
-                        # Fetch recent tweets from this approved project
-                        await self._fetch_search_query(f"from:{handle}")
+                        await self._fetch_search_query(query)
                     except Exception as exc:
-                        logger.warning("x_rapidapi.approved_handle_failed", handle=handle, error=str(exc))
+                        logger.warning("x_rapidapi.query_failed", query=query, error=str(exc))
                     await asyncio.sleep(1.0)
+                last_discovery = asyncio.get_event_loop().time()
+                logger.info(
+                    "x_rapidapi.discovery_scan_completed",
+                    next_discovery_in_seconds=discovery_interval,
+                )
 
-            logger.info(
-                "x_rapidapi.scan_completed",
-                next_scan_in_minutes=round(self._settings.rapidapi_poll_interval_seconds / 60, 1),
-            )
-            await asyncio.sleep(max(1.0, self._settings.rapidapi_poll_interval_seconds))
+            # 2. Fast approved-account CA monitoring (target 1–5s)
+            try:
+                await self._poll_approved_handles_once()
+            except Exception as exc:
+                logger.warning("x_rapidapi.approved_scan_failed", error=str(exc))
+
+            await asyncio.sleep(approved_interval)
 
     async def _fetch_search_query(self, query: str) -> None:
         """Search recent tweets for a specific keyword query."""

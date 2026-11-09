@@ -142,6 +142,22 @@ class Message:
             **kwargs,
         )
 
+    async def reply_text(
+        self,
+        text: str,
+        reply_markup: Any = None,
+        parse_mode: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Message:
+        bot = Bot(token=self._bot_token)
+        return await bot.send_message(
+            chat_id=self.chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            **kwargs,
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         if self._raw:
             return self._raw
@@ -258,6 +274,24 @@ class Update:
             return self.channel_post.from_user
         return None
 
+    @property
+    def effective_message(self) -> Optional[Message]:
+        if self.message is not None:
+            return self.message
+        if self.channel_post is not None:
+            return self.channel_post
+        if self.callback_query is not None:
+            return self.callback_query.message
+        return None
+
+
+class ChatMember:
+    """Minimal chat member for admin allowlist fetching."""
+
+    def __init__(self, user: User, status: str = "administrator") -> None:
+        self.user = user
+        self.status = status
+
 
 class Bot:
     def __init__(self, token: str = "", **kwargs: Any) -> None:
@@ -338,3 +372,59 @@ class Bot:
                 return resp.status_code == 200
         except Exception:
             return False
+
+    async def get_chat(self, chat_id: Any) -> Chat:
+        """Resolve a chat by id or @username."""
+        if not self.token:
+            raw = str(chat_id).lstrip("@")
+            try:
+                cid = int(raw)
+            except ValueError:
+                cid = abs(hash(raw)) % (10**12)
+            return Chat(id=cid, type="channel", title=raw, bot_token=self.token)
+
+        url = f"https://api.telegram.org/bot{self.token}/getChat"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, json={"chat_id": chat_id})
+                if resp.status_code == 200:
+                    data = resp.json().get("result", {})
+                    return Chat(
+                        id=data.get("id", 0),
+                        type=data.get("type", "channel"),
+                        title=data.get("title") or data.get("username"),
+                        bot_token=self.token,
+                    )
+        except Exception:
+            pass
+        raise RuntimeError(f"getChat failed for {chat_id}")
+
+    async def get_chat_administrators(self, chat_id: Any) -> List[ChatMember]:
+        """Return chat administrators (human + bots)."""
+        if not self.token:
+            return []
+
+        url = f"https://api.telegram.org/bot{self.token}/getChatAdministrators"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, json={"chat_id": chat_id})
+                if resp.status_code != 200:
+                    return []
+                results = resp.json().get("result", [])
+                members: List[ChatMember] = []
+                for item in results:
+                    u = item.get("user", {})
+                    members.append(
+                        ChatMember(
+                            user=User(
+                                id=u.get("id", 0),
+                                is_bot=u.get("is_bot", False),
+                                first_name=u.get("first_name", ""),
+                                username=u.get("username"),
+                            ),
+                            status=item.get("status", "administrator"),
+                        )
+                    )
+                return members
+        except Exception:
+            return []

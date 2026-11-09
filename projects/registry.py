@@ -74,6 +74,23 @@ class ProjectRegistry:
         )
         return await self._s.scalar(stmt)
 
+    async def _find_by_telegram(self, telegram_ref: str) -> Optional[Project]:
+        """Return a Project matched by official Telegram username or chat id."""
+        ref = telegram_ref.strip()
+        if not ref:
+            return None
+        username = ref.lstrip("@").lower()
+        stmt = (
+            select(Project)
+            .where(
+                (Project.official_telegram_chat_id == ref)
+                | (Project.official_telegram_chat_id == username)
+                | (Project.official_telegram == username)
+            )
+            .limit(1)
+        )
+        return await self._s.scalar(stmt)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -132,6 +149,16 @@ class ProjectRegistry:
             if existing:
                 log.info("project_registry.deduplicated", method="x_handle", project_id=str(existing.id))
 
+        # 4. Match by official Telegram chat id / username
+        if existing is None and parsed.platform == "telegram" and parsed.chat_id:
+            existing = await self._find_by_telegram(str(parsed.chat_id))
+            if existing:
+                log.info(
+                    "project_registry.deduplicated",
+                    method="telegram",
+                    project_id=str(existing.id),
+                )
+
         # If a duplicate was found, return it (even if blacklisted — do NOT recreate)
         if existing is not None:
             return existing, False
@@ -140,7 +167,7 @@ class ProjectRegistry:
         project = Project(
             id=str(uuid.uuid4()),
             ticker=parsed.ticker.upper() if parsed.ticker else None,
-            project_name=parsed.project_name,
+            name=parsed.project_name,
             chain_id=parsed.chain_id,
             ca_address=parsed.ca_address,
             official_x_handle=(

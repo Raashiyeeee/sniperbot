@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import structlog
 from sqlalchemy import select
@@ -19,6 +19,7 @@ from config.chains import validate_address
 from database.models import (
     AuditEvent,
     ContractCandidate,
+    Platform,
     Project,
     ProjectStatus,
     SourceAccount,
@@ -29,11 +30,33 @@ from projects.status_lifecycle import assert_valid_transition
 logger = structlog.get_logger(__name__)
 
 
+def _extract_admin_ids(payload: object) -> List[str]:
+    if payload is None:
+        return []
+    if isinstance(payload, list):
+        return [str(a) for a in payload]
+    if isinstance(payload, dict):
+        admins = payload.get("admins", [])
+        if isinstance(admins, list):
+            return [str(a) for a in admins]
+    return []
+
+
 class CAResolver:
     """Verifies that an incoming CA announcement is authentic and conflict-free."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def _load_telegram_source(self, project: Project) -> Optional[SourceAccount]:
+        account_id = project.official_telegram_chat_id or project.official_telegram
+        if not account_id:
+            return None
+        stmt = select(SourceAccount).where(
+            SourceAccount.platform == Platform.TELEGRAM,
+            SourceAccount.account_id == str(account_id),
+        )
+        return await self._session.scalar(stmt)
 
     async def verify_source(
         self,
@@ -43,13 +66,14 @@ class CAResolver:
         sender_username: Optional[str],
         is_forwarded: bool,
         source_account_id: Optional[str] = None,
+        chat_id: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """
         Verify that the message sender is an authorized source.
         Spec v3.1 §8.1 & §8.2:
         - X: Must be the configured official X account.
-        - Telegram: Must be an authorized admin. Reject forwarded messages,
-          ordinary members, unknown senders.
+        - Telegram: Must be an authorized admin in the official chat.
+          Reject forwarded messages, ordinary members, unknown senders.
         """
         if is_forwarded:
             logger.warning(
@@ -64,8 +88,7 @@ class CAResolver:
             expected_handle = (project.official_x_handle or "").lstrip("@").lower()
             actual_handle = (sender_username or sender_id or "").lstrip("@").lower()
             if not expected_handle:
-                # If project has no handle configured yet, flag for operator
-                return True, "Official handle not pre-locked, accepted with notice"
+                return False, "Official X handle not configured — cannot verify source"
             if expected_handle != actual_handle:
                 logger.warning(
                     "ca_source_rejected_x_handle_mismatch",
@@ -79,23 +102,52 @@ class CAResolver:
             if not sender_id:
                 return False, "Missing Telegram sender ID"
 
-            # Check authorized admin list on source account if available
+            expected_chat = project.official_telegram_chat_id
+            if expected_chat and chat_id and str(chat_id) != str(expected_chat):
+                logger.warning(
+                    "ca_source_rejected_wrong_telegram_chat",
+                    expected=expected_chat,
+                    actual=chat_id,
+                    project_id=project.id,
+                )
+                return False, f"Telegram chat mismatch: expected {expected_chat}, got {chat_id}"
+
+            if not expected_chat and not project.official_telegram:
+                return False, "Official Telegram chat not configured — cannot verify source"
+
+            allowed_ids: List[str] = []
+            src: Optional[SourceAccount] = None
+
             if source_account_id:
                 stmt = select(SourceAccount).where(SourceAccount.id == source_account_id)
                 src = await self._session.scalar(stmt)
-                if src and src.authorized_admin_ids:
-                    admin_ids = src.authorized_admin_ids
-                    # Handle dict or list in JSONB
-                    allowed_ids = admin_ids if isinstance(admin_ids, list) else admin_ids.get("admins", [])
-                    if sender_id not in [str(a) for a in allowed_ids]:
-                        logger.warning(
-                            "ca_source_rejected_unauthorized_tg_admin",
-                            sender_id=sender_id,
-                            allowed_admins=allowed_ids,
-                        )
-                        return False, f"Telegram sender {sender_id} is not an authorized administrator"
+            if src is None:
+                src = await self._load_telegram_source(project)
 
-            return True, "Telegram source authenticated"
+            if src and src.authorized_admin_ids:
+                allowed_ids = _extract_admin_ids(src.authorized_admin_ids)
+
+            if not allowed_ids:
+                logger.warning(
+                    "ca_source_rejected_no_tg_admins",
+                    project_id=project.id,
+                    sender_id=sender_id,
+                )
+                return False, (
+                    "No authorized Telegram admins configured for this project. "
+                    "Use /set_tg and ensure the bot can read chat administrators."
+                )
+
+            if str(sender_id) not in allowed_ids:
+                logger.warning(
+                    "ca_source_rejected_unauthorized_tg_admin",
+                    sender_id=sender_id,
+                    allowed_admins=allowed_ids,
+                    project_id=project.id,
+                )
+                return False, f"Telegram sender {sender_id} is not an authorized administrator"
+
+            return True, "Telegram admin verified"
 
         elif platform == "manual":
             return True, "Manual operator input"
@@ -112,6 +164,7 @@ class CAResolver:
         message_id: Optional[str] = None,
         is_forwarded: bool = False,
         source_account_id: Optional[str] = None,
+        chat_id: Optional[str] = None,
     ) -> Tuple[Optional[ContractCandidate], str]:
         """
         Full CA processing pipeline:
@@ -121,7 +174,6 @@ class CAResolver:
         4. Detect conflicting CA.
         5. Transition project status to CA_DETECTED.
         """
-        # 1. Project must be APPROVED or CA_DETECTED to process CA
         allowed_statuses = {ProjectStatus.APPROVED, ProjectStatus.CA_DETECTED}
         if project.status not in allowed_statuses:
             logger.info(
@@ -131,25 +183,27 @@ class CAResolver:
             )
             return None, f"Project status is {project.status}, must be APPROVED or CA_DETECTED"
 
-        # 2. Source authentication
         is_auth, auth_msg = await self.verify_source(
-            project, platform, sender_id, sender_username, is_forwarded, source_account_id
+            project,
+            platform,
+            sender_id,
+            sender_username,
+            is_forwarded,
+            source_account_id,
+            chat_id=chat_id,
         )
         if not is_auth:
             return None, f"Source verification failed: {auth_msg}"
 
-        # 3. Extract CA
         candidates = CAExtractor.extract_for_chain(text, project.chain_id)
         if not candidates:
             return None, "No valid contract address found in text"
 
         detected_address = candidates[0]
 
-        # Validate against chain rules
         if project.chain_id and not validate_address(detected_address, project.chain_id):
             return None, f"Address {detected_address} invalid for chain {project.chain_id}"
 
-        # 4. Check for conflicting CA (Spec v3.1 §8.3)
         stmt = (
             select(ContractCandidate)
             .where(ContractCandidate.project_id == project.id)
@@ -173,18 +227,15 @@ class CAResolver:
                     existing_ca=existing.address,
                     new_ca=detected_address,
                 )
-                # Move to SAFETY_BLOCKED on conflict
                 assert_valid_transition(project.status, ProjectStatus.SAFETY_BLOCKED, project.id)
                 project.status = ProjectStatus.SAFETY_BLOCKED
                 break
 
-        # If already recorded with exact same CA, return existing (duplicate protection)
         for existing in existing_cands:
             if existing.address.lower() == detected_address.lower():
                 logger.info("ca_duplicate_ignored", ca=detected_address)
                 return existing, "Duplicate CA announcement received"
 
-        # 5. Persist ContractCandidate
         candidate = ContractCandidate(
             id=str(uuid.uuid4()),
             project_id=project.id,
@@ -200,13 +251,11 @@ class CAResolver:
         )
         self._session.add(candidate)
 
-        # Update project CA and transition to CA_DETECTED if no conflict
         if not has_conflict:
             assert_valid_transition(project.status, ProjectStatus.CA_DETECTED, project.id)
             project.status = ProjectStatus.CA_DETECTED
             project.ca_address = detected_address
 
-        # Append audit log
         audit = AuditEvent(
             actor="system:ca_resolver",
             action="ca_detected" if not has_conflict else "ca_conflict_blocked",

@@ -2,7 +2,7 @@
 tests/test_pre_buy_checks.py
 ────────────────────────────
 Unit tests for Phase 4: Pre-buy checks & Volume Snapshot:
-  - Buy tax and sell tax limit (3.0% max)
+  - Buy tax and sell tax limit (2.0% max)
   - Tax reconciliation (taking higher of simulation & API)
   - Staleness (> 60s) -> UNKNOWN
   - Missing tax data -> UNKNOWN
@@ -26,31 +26,31 @@ from volume.wash_trade_filters import TradeEvent, WashTradeFilter
 class TestTaxChecker:
     def test_taxes_within_limits_pass(self):
         checker = TaxChecker()
-        # Buy 2.5% <= 3.0%, Sell 2.0% <= 3.0%
-        result = checker.evaluate_taxes(sim_buy_tax=2.5, sim_sell_tax=2.0)
+        # Buy 1.5% <= 2.0%, Sell 1.0% <= 2.0%
+        result = checker.evaluate_taxes(sim_buy_tax=1.5, sim_sell_tax=1.0)
         assert result.status == CheckResult.PASS
-        assert result.buy_tax_pct == 2.5
-        assert result.sell_tax_pct == 2.0
+        assert result.buy_tax_pct == 1.5
+        assert result.sell_tax_pct == 1.0
 
     def test_taxes_at_exact_limit_pass(self):
         checker = TaxChecker()
-        # Exactly 3.0%
-        result = checker.evaluate_taxes(sim_buy_tax=3.0, sim_sell_tax=3.0)
+        # Exactly 2.0%
+        result = checker.evaluate_taxes(sim_buy_tax=2.0, sim_sell_tax=2.0)
         assert result.status == CheckResult.PASS
 
     def test_buy_tax_above_limit_fails(self):
         checker = TaxChecker()
-        # Buy 3.5% > 3.0%
-        result = checker.evaluate_taxes(sim_buy_tax=3.5, sim_sell_tax=1.0)
+        # Buy 2.5% > 2.0%
+        result = checker.evaluate_taxes(sim_buy_tax=2.5, sim_sell_tax=1.0)
         assert result.status == CheckResult.FAIL
-        assert "Buy tax 3.5% exceeds max 3.0%" in result.message
+        assert "Buy tax 2.5% exceeds max 2.0%" in result.message
 
     def test_sell_tax_above_limit_fails(self):
         checker = TaxChecker()
-        # Sell 5.0% > 3.0%
+        # Sell 5.0% > 2.0%
         result = checker.evaluate_taxes(sim_buy_tax=1.0, sim_sell_tax=5.0)
         assert result.status == CheckResult.FAIL
-        assert "Sell tax 5.0% exceeds max 3.0%" in result.message
+        assert "Sell tax 5.0% exceeds max 2.0%" in result.message
 
     def test_reconciliation_uses_higher_value(self):
         checker = TaxChecker()
@@ -61,7 +61,7 @@ class TestTaxChecker:
             api_buy_tax=4.0,  # Higher!
             api_sell_tax=1.0,
         )
-        assert result.status == CheckResult.FAIL  # 4.0% > 3.0%
+        assert result.status == CheckResult.FAIL  # 4.0% > 2.0%
         assert result.buy_tax_pct == 4.0
 
     def test_stale_simulation_returns_unknown(self):

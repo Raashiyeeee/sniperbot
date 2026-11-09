@@ -19,6 +19,7 @@ from telegram import Message, Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 from config.settings import get_settings
+from monitoring.approved_sources import approved_sources
 
 logger = structlog.get_logger(__name__)
 
@@ -234,12 +235,25 @@ class TelegramListenerConnector:
             )
             return
 
+        chat_id = str(payload.get("chat_id", ""))
+        # Only continuously monitor approved project official chats for CA/auto-buy.
+        # Operator alert chat is excluded unless it was explicitly attached as a project source.
+        if approved_sources.allowed_telegram_chats():
+            if not approved_sources.is_allowed_telegram_chat(chat_id):
+                logger.debug(
+                    "telegram_listener.chat_not_monitored",
+                    chat_id=chat_id,
+                )
+                return
+            payload["monitored_project_id"] = approved_sources.project_id_for_telegram_chat(chat_id)
+
         await self._queue.put(payload)
         logger.debug(
             "telegram_listener.message_enqueued",
             chat_id=payload["chat_id"],
             message_id=payload["message_id"],
             is_forwarded=payload["is_forwarded"],
+            monitored_project_id=payload.get("monitored_project_id"),
         )
 
     async def _handle_error(

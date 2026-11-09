@@ -106,6 +106,15 @@ async def _ensure_sqlite_columns(conn) -> None:
             ("projects", "product_summary", "TEXT"),
             ("projects", "documentation_url", "VARCHAR(1024)"),
             ("projects", "ecosystem_links", "JSON DEFAULT '{}'"),
+            ("projects", "official_telegram_chat_id", "VARCHAR(64)"),
+            ("projects", "is_shortlisted", "BOOLEAN DEFAULT 0"),
+            ("projects", "launchpad", "VARCHAR(64)"),
+            ("projects", "launch_mechanism", "VARCHAR(64)"),
+            ("projects", "router_contract", "VARCHAR(256)"),
+            ("projects", "pool_manager", "VARCHAR(256)"),
+            ("projects", "hook_address", "VARCHAR(256)"),
+            ("projects", "quote_asset", "VARCHAR(256)"),
+            ("projects", "sniper_config", "JSON DEFAULT '{}'"),
         ]:
             res = await conn.execute(text(f"PRAGMA table_info({t})"))
             cols = [r[1] for r in res.fetchall()]

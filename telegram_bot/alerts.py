@@ -125,16 +125,21 @@ class AlertService:
             else:
                 x_profile = "Not available"
 
-        # Network (Solana or Robinhood Chain)
+        # Network (Solana, Robinhood Chain, or Elysium)
         network = (
             getattr(announcement, "network", None)
             or getattr(project, "network", None)
             or (project.chain_id.capitalize() if project.chain_id else None)
             or "Solana"
         )
-        if "sol" in network.lower():
+        net_lower = network.lower().replace("_", " ")
+        if "elysium testnet" in net_lower:
+            network = "Elysium Testnet"
+        elif "elysium" in net_lower:
+            network = "Elysium"
+        elif "sol" in net_lower:
             network = "Solana"
-        elif "robinhood" in network.lower() or "rh" in network.lower() or "evm" in network.lower():
+        elif "robinhood" in net_lower or "rh" in net_lower or "evm" in net_lower:
             network = "Robinhood Chain"
 
         # Check if project has AI intelligence results

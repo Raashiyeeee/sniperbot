@@ -116,6 +116,35 @@ class TestAnnouncementParser:
         assert parsed.post_url == "https://x.com/gem_project/status/99887766"
         assert parsed.x_profile_url == "https://x.com/gem_project"
 
+    def test_extract_elysium_mainnet(self, parser):
+        msg = {
+            "platform": "x",
+            "message_id": "ely1",
+            "text": "Launching $HYPEGEM on Elysium! CA soon. Official CA: 0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+            "author_id": "elysium_dev",
+            "received_at": "2026-11-04T12:00:05Z",
+            "is_forwarded": False,
+        }
+        parsed = parser.parse(msg, "ca_announcement")
+        assert parsed.ticker == "HYPEGEM"
+        assert parsed.chain_id == "elysium"
+        assert parsed.network == "Elysium"
+        assert parsed.ca_address == "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+
+    def test_extract_elysium_testnet(self, parser):
+        msg = {
+            "platform": "telegram",
+            "message_id": "ely2",
+            "text": "$TEST launching on Elysium Testnet. Stay tuned!",
+            "author_id": "testnet_admin",
+            "received_at": "2026-11-04T12:00:05Z",
+            "is_forwarded": False,
+        }
+        parsed = parser.parse(msg, "launch_intent")
+        assert parsed.ticker == "TEST"
+        assert parsed.chain_id == "elysium_testnet"
+        assert parsed.network == "Elysium Testnet"
+
     def test_different_times_and_projects(self, parser):
         # Project A: 5 PM UTC
         msg_a = {

@@ -1,0 +1,23 @@
+{
+  "name": "Example Project",
+  "ticker": "EXMP",
+  "slug": "example",
+  "chain_id": "elysium",
+  "official_x_handle": "ExampleProject",
+  "official_telegram": "examplechannel",
+  "official_telegram_chat_id": "-1001234567890",
+  "authorized_telegram_admins": ["123456789", "987654321"],
+  "website_url": "https://example.com",
+  "documentation_url": "https://docs.example.com",
+  "launchpad": "boxa",
+  "launch_mechanism": "bonding_curve",
+  "router_contract": "0xRouterAddressHere",
+  "pool_manager": null,
+  "hook_address": null,
+  "quote_asset": "HYPE",
+  "token_address": null,
+  "expected_ca_source": "both",
+  "auto_approve": true,
+  "enabled": false,
+  "notes": "Ultra-Fast Sniper: Elysium 99901 / 1 HYPE buy / max tax 2% / max slippage 5% / manual sell only. Copy this file, rename without leading _, set enabled=true, fill real addresses. See config/ELYSIUM_ULTRA_FAST_SNIPER.md."
+}

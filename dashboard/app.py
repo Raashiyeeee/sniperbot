@@ -110,6 +110,7 @@ class ProjectDetail(ProjectSummary):
     description: Optional[str]
     official_x_handle: Optional[str]
     official_telegram: Optional[str]
+    official_telegram_chat_id: Optional[str] = None
     website_url: Optional[str]
     expected_ca_source: Optional[str]
     identity_keys: Optional[Dict[str, Any]]

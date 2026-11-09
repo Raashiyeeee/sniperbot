@@ -27,6 +27,8 @@ class ProjectCategory(str, Enum):
 class BlockchainType(str, Enum):
     SOLANA = "Solana"
     ROBINHOOD_CHAIN = "Robinhood Chain"
+    ELYSIUM = "Elysium"
+    ELYSIUM_TESTNET = "Elysium Testnet"
     UNKNOWN = "Unknown"
 
 
@@ -70,7 +72,7 @@ class ProjectIdentification(BaseModel):
     )
     blockchain: BlockchainType = Field(
         BlockchainType.SOLANA,
-        description="Target blockchain (Solana or Robinhood Chain)"
+        description="Target blockchain (Solana, Robinhood Chain, or Elysium)"
     )
     website_url: Optional[str] = Field(None, description="Official project website")
     official_x_handle: Optional[str] = Field(None, description="Official X (@username)")
@@ -98,7 +100,7 @@ class CredibilityAnalysis(BaseModel):
     official_source_confirmed: bool = Field(False, description="True if post originates from official project")
     team_identifiable: bool = Field(False, description="True if team/founder is identifiable")
     website_verified: bool = Field(False, description="True if website matches claimed identity")
-    ecosystem_presence: bool = Field(False, description="True if integrated into Solana/Robinhood ecosystem")
+    ecosystem_presence: bool = Field(False, description="True if integrated into Solana/Robinhood/Elysium ecosystem")
     credibility_score: float = Field(0.0, ge=0.0, le=100.0, description="Project credibility score (0-100)")
     ecosystem_score: float = Field(0.0, ge=0.0, le=100.0, description="Ecosystem presence score (0-100)")
     evidence: List[str] = Field(default_factory=list, description="Verified credibility points")

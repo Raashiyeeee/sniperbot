@@ -2,7 +2,7 @@
 security/tax_checker.py
 ───────────────────────
 Buy and sell tax measurement and validation (Spec v3.1 §9, §9.2).
-Enforces configurable max tax limits (default 3.0%).
+Enforces configurable max tax limits (default 2.0%).
 Uses on-chain simulation as primary source, security APIs as secondary sanity check.
 """
 from __future__ import annotations
@@ -52,8 +52,8 @@ class TaxChecker:
         1. If simulation result is missing or timed out -> UNKNOWN -> do not buy.
         2. If simulation result is > 60 seconds old -> Mark stale/UNKNOWN.
         3. If simulation and API disagree -> Use the HIGHER value.
-        4. Buy tax must be <= max_buy_tax_pct (default 3.0%).
-        5. Sell tax must be <= max_sell_tax_pct (default 3.0%).
+        4. Buy tax must be <= max_buy_tax_pct (default 2.0%).
+        5. Sell tax must be <= max_sell_tax_pct (default 2.0%).
         """
         now = datetime.now(timezone.utc)
         max_buy = self.settings.max_buy_tax_pct

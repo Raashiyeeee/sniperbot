@@ -21,7 +21,10 @@ from typing import Optional, Tuple
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.chains import is_evm_chain
 from config.settings import get_settings
+from sqlalchemy import select
+
 from database.models import (
     AuditEvent,
     Order,
@@ -34,6 +37,7 @@ from database.models import (
 from projects.status_lifecycle import assert_valid_transition
 from trading.emergency import EmergencyManager
 from trading.evm_executor import EVMExecutor
+from trading.launchpads import select_buy_route
 from trading.quote_engine import QuoteEngine
 from trading.solana_executor import SolanaExecutor
 from trading.wallet_manager import WalletManager
@@ -61,6 +65,36 @@ class OrderManager:
         self.emergency_mgr = emergency_mgr or EmergencyManager()
         self.settings = get_settings()
 
+    async def _duplicate_purchase_block_reason(
+        self,
+        project: Project,
+        ca_address: str,
+    ) -> Optional[str]:
+        """Return a block reason when duplicate purchases are disabled."""
+        if project.status == ProjectStatus.PURCHASED:
+            return "Duplicate purchase disabled: project already purchased"
+
+        open_pos = await self._session.scalar(
+            select(Position).where(
+                Position.project_id == project.id,
+                Position.status == PositionStatus.OPEN,
+            )
+        )
+        if open_pos is not None:
+            return "Duplicate purchase disabled: open position already exists"
+
+        if ca_address:
+            filled = await self._session.scalar(
+                select(Order).where(
+                    Order.project_id == project.id,
+                    Order.ca_address == ca_address,
+                    Order.status.in_([OrderStatus.FILLED, OrderStatus.CONFIRMED]),
+                )
+            )
+            if filled is not None:
+                return "Duplicate purchase disabled: filled order already exists for this CA"
+        return None
+
     async def execute_approved_buy(
         self,
         project: Project,
@@ -71,9 +105,16 @@ class OrderManager:
         Fast-path target: < 2 seconds from trigger to submission.
         """
         start_ts = time.perf_counter()
-        trade_amount = amount_usd or self.settings.per_trade_spend_cap_usd
-        chain_id = project.chain_id or "robinhood"
+        chain_id = (project.chain_id or "robinhood").lower()
         ca_address = project.ca_address or ""
+
+        # Elysium Ultra-Fast Sniper: default buy = 1 HYPE (mapped to USD for risk caps)
+        if amount_usd is not None:
+            trade_amount = amount_usd
+        elif chain_id in ("elysium", "elysium_testnet"):
+            trade_amount = self.settings.elysium_buy_amount_usd
+        else:
+            trade_amount = self.settings.per_trade_spend_cap_usd
 
         # Step 1: Emergency & Circuit breakers check
         can_trade, breaker_reason = self.emergency_mgr.can_trade(chain_id, project.id)
@@ -87,17 +128,39 @@ class OrderManager:
             logger.warning("buy_blocked_wrong_status", status=project.status)
             return None, None, msg
 
+        # Step 2b: Duplicate purchases disabled (Ultra-Fast Sniper §3)
+        if not self.settings.allow_duplicate_purchases:
+            dup_msg = await self._duplicate_purchase_block_reason(project, ca_address)
+            if dup_msg:
+                logger.warning("buy_blocked_duplicate_purchase", reason=dup_msg)
+                return None, None, dup_msg
+
         # Step 3: Wallet risk limits check (per-trade cap, daily caps, position limits)
         risk_check = self.wallet_mgr.check_trade_allowed(trade_amount)
         if not risk_check.allowed:
             logger.warning("buy_blocked_by_wallet_risk", reason=risk_check.reason)
             return None, None, f"Risk check failed: {risk_check.reason}"
 
+        # Step 3b: Launchpad / Uniswap V4 smart route selection (project docs = source of truth)
+        buy_plan = await select_buy_route(project, ca_address, trade_amount)
+        if not buy_plan.is_executable:
+            msg = f"No tradable launchpad route: {buy_plan.reason}"
+            logger.warning(
+                "buy_blocked_no_route",
+                project_id=project.id,
+                launchpad=buy_plan.launchpad.value,
+                reason=buy_plan.reason,
+            )
+            return None, None, msg
+
         # Step 4: Quote validation
         quote = self.quote_engine.get_quote(chain_id, ca_address, trade_amount)
         if not quote.is_valid:
             logger.warning("buy_blocked_invalid_quote", reason=quote.rejection_reason)
             return None, None, f"Quote rejected: {quote.rejection_reason}"
+
+        route_label = f"{buy_plan.launchpad.value}:{buy_plan.route_kind.value}"
+        quote.route = route_label
 
         # Step 5: Transition to BUYING
         assert_valid_transition(project.status, ProjectStatus.BUYING, project.id)
@@ -110,13 +173,30 @@ class OrderManager:
             ca_address=ca_address,
             chain_id=chain_id,
             amount_usd=trade_amount,
-            amount_native=None,
+            amount_native=(
+                self.settings.elysium_buy_amount_hype
+                if chain_id in ("elysium", "elysium_testnet") and amount_usd is None
+                else None
+            ),
             quote_data={
                 "expected_tokens": quote.expected_amount_out,
                 "slippage_pct": quote.slippage_pct,
                 "price_impact_pct": quote.estimated_price_impact_pct,
+                "launchpad": buy_plan.launchpad.value,
+                "route_kind": buy_plan.route_kind.value,
+                "router_contract": buy_plan.router_contract,
+                "pool_manager": buy_plan.pool_manager,
+                "hook_address": buy_plan.hook_address,
+                "quote_asset": buy_plan.quote_asset,
+                "buy_amount_hype": (
+                    self.settings.elysium_buy_amount_hype
+                    if chain_id in ("elysium", "elysium_testnet")
+                    else None
+                ),
+                "gas_strategy": self.settings.evm_gas_strategy,
+                "simulation_enabled": self.settings.transaction_simulation_enabled,
             },
-            route=quote.route,
+            route=route_label,
             status=OrderStatus.SUBMITTED,
             is_paper=self.settings.is_paper or (self.settings.app_env == "development"),
             submitted_at=datetime.now(timezone.utc),
@@ -127,8 +207,17 @@ class OrderManager:
         # Step 6: Dispatch to blockchain executor
         if chain_id == "solana":
             exec_res = await self.sol_exec.execute_buy(quote)
-        else:
+        elif is_evm_chain(chain_id):
             exec_res = await self.evm_exec.execute_buy(quote)
+        else:
+            msg = f"Unsupported chain for execution: {chain_id}"
+            logger.error("buy_blocked_unsupported_chain", chain_id=chain_id)
+            order.status = OrderStatus.FAILED
+            order.error_message = msg
+            assert_valid_transition(project.status, ProjectStatus.SAFETY_BLOCKED, project.id)
+            project.status = ProjectStatus.SAFETY_BLOCKED
+            await self._session.flush()
+            return order, None, msg
 
         total_latency_ms = (time.perf_counter() - start_ts) * 1000
 

@@ -41,7 +41,7 @@ class EmergencyManager:
         logger.warning("GLOBAL_EMERGENCY_STOP_CLEARED", actor=actor)
 
     def pause_chain(self, chain_id: str, actor: str = "operator") -> None:
-        """Pause automated trading on a specific blockchain (e.g. 'robinhood' or 'solana')."""
+        """Pause automated trading on a specific blockchain (e.g. 'robinhood', 'solana', or 'elysium')."""
         self._paused_chains.add(chain_id.lower())
         logger.warning("chain_trading_paused", chain=chain_id, actor=actor)
 

@@ -57,10 +57,15 @@ class IdentityMatcher:
 
         if official_x_handle:
             handle = official_x_handle.lstrip("@").lower()
-            filters.append(Project.official_x_handle == handle)
+            filters.append(func.lower(Project.official_x_handle) == handle)
 
         if official_telegram:
-            filters.append(Project.official_telegram == official_telegram.lower())
+            tg = official_telegram.strip()
+            tg_lower = tg.lstrip("@").lower()
+            # Match username OR numeric chat id stored on the project
+            filters.append(func.lower(Project.official_telegram) == tg_lower)
+            filters.append(Project.official_telegram_chat_id == tg)
+            filters.append(Project.official_telegram_chat_id == tg.lstrip("@"))
 
         if not filters:
             return None

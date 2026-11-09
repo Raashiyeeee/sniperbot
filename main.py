@@ -6,7 +6,7 @@ Spec v3.1:
   - Universal launch radar discovery from X & Telegram (Phase 1)
   - Mandatory operator approval workflow with Telegram inline buttons (Phase 2)
   - Approved-only official CA monitoring with conflict detection (Phase 3)
-  - Pre-buy checks: 3% tax limit, $100 genuine volume snapshot, security scan (Phase 4)
+  - Pre-buy checks: 2% tax limit, $100 genuine volume snapshot, security scan (Phase 4)
   - Approved-auto fast-path buy execution with 2-second target & risk controls (Phase 5 & 6)
   - Expiry scheduler & background dashboard API
 """
@@ -32,8 +32,10 @@ from database.models import Assessment, CheckResult, EventType, Project, Project
 from monitoring.announcement_parser import AnnouncementParser
 from monitoring.ca_resolver import CAResolver
 from monitoring.event_detector import EventDetector
+from projects.account_manager import AccountManager
 from projects.identity_matcher import IdentityMatcher
 from projects.registry import ProjectRegistry
+from projects.shortlist_loader import ShortlistLoader
 from projects.status_lifecycle import assert_valid_transition
 from security.contract_scanner import ContractSecurityScanner
 from security.official_page_filter import OfficialPageFilter
@@ -144,23 +146,40 @@ async def process_message(
 
             # 3. Identity matching & blacklist check
             matcher = IdentityMatcher(session)
+            tg_identity = None
+            if platform == "telegram":
+                tg_identity = (
+                    str(message.get("chat_id"))
+                    if message.get("chat_id") is not None
+                    else None
+                )
+
             is_blacklisted = await matcher.is_blacklisted(
                 ticker=parsed.ticker,
                 chain_id=parsed.chain_id,
                 ca_address=parsed.ca_address,
                 official_x_handle=parsed.author_id if platform == "x" else None,
+                official_telegram=tg_identity,
             )
             if is_blacklisted:
                 logger.info("blacklisted_identity_ignored", ticker=parsed.ticker, ca=parsed.ca_address)
                 return
 
             # 4. Check existing project and apply strict discovery filters for unapproved posts
-            existing_project = await matcher.find_existing(
-                ticker=parsed.ticker,
-                chain_id=parsed.chain_id,
-                ca_address=parsed.ca_address,
-                official_x_handle=parsed.author_id if platform == "x" else None,
-            )
+            # Prefer monitored_project_id from Telegram listener when present.
+            existing_project: Optional[Project] = None
+            monitored_pid = message.get("monitored_project_id")
+            if monitored_pid:
+                existing_project = await session.get(Project, monitored_pid)
+
+            if existing_project is None:
+                existing_project = await matcher.find_existing(
+                    ticker=parsed.ticker,
+                    chain_id=parsed.chain_id,
+                    ca_address=parsed.ca_address,
+                    official_x_handle=parsed.author_id if platform == "x" else None,
+                    official_telegram=tg_identity,
+                )
 
             # If candidate is not already an APPROVED project:
             if existing_project is None or existing_project.status == ProjectStatus.PENDING_APPROVAL:
@@ -215,15 +234,31 @@ async def process_message(
                     return
 
             registry = ProjectRegistry(session)
-            project, created = await registry.get_or_create_project(parsed)
+            # Prefer the already-matched project (Telegram chat allowlist via
+            # monitored_project_id, or identity match). get_or_create alone can miss
+            # CA-only posts that lack ticker/handle signals and would spawn a duplicate.
+            if existing_project is not None:
+                project, created = existing_project, False
+            else:
+                project, created = await registry.get_or_create_project(parsed)
 
             if ai_result is not None:
                 registry.apply_ai_intelligence(project, ai_result)
 
+            # Resolve SourceAccount for official-source CA verification
+            acct_mgr = AccountManager(session)
+            source_account_id = None
+            if platform == "x":
+                x_src = await acct_mgr.get_x_source_account(project)
+                source_account_id = x_src.id if x_src else None
+            elif platform == "telegram":
+                tg_src = await acct_mgr.get_telegram_source_account(project)
+                source_account_id = tg_src.id if tg_src else None
+
             announcement = await registry.create_announcement(
                 project_id=project.id,
                 parsed=parsed,
-                source_account_id=None,
+                source_account_id=source_account_id,
             )
             await session.commit()
 
@@ -291,9 +326,13 @@ async def process_message(
                     text=text,
                     platform=platform,
                     sender_id=message.get("author_id") or message.get("sender_id"),
-                    sender_username=message.get("sender_username"),
-                    message_id=message.get("message_id"),
+                    sender_username=message.get("sender_username") or (
+                        message.get("author_id") if platform == "x" else None
+                    ),
+                    message_id=str(message.get("message_id")) if message.get("message_id") is not None else None,
                     is_forwarded=message.get("is_forwarded", False),
+                    source_account_id=source_account_id,
+                    chat_id=str(message.get("chat_id")) if message.get("chat_id") is not None else None,
                 )
                 await session.commit()
 
@@ -308,36 +347,78 @@ async def process_message(
                 checks_passed = True
                 failure_reasons = []
 
-                # A. Tax check (3.0% max)
-                sim_buy_tax = 1.5
-                sim_sell_tax = 1.5
-                tax_res = tax_checker.evaluate_taxes(sim_buy_tax, sim_sell_tax)
-
-                if tax_res.status != CheckResult.PASS:
+                # A. Tax / simulation check (max buy tax 2% — Ultra-Fast Sniper §3)
+                # Live mode: missing on-chain simulation => UNKNOWN => do not buy.
+                # Paper/development: use local simulation placeholders until RPC sims are wired.
+                if settings.transaction_simulation_enabled:
+                    if settings.app_env == "live":
+                        sim_buy_tax = None
+                        sim_sell_tax = None
+                    else:
+                        sim_buy_tax = 1.5
+                        sim_sell_tax = 1.5
+                    tax_res = tax_checker.evaluate_taxes(sim_buy_tax, sim_sell_tax)
+                    if tax_res.status != CheckResult.PASS:
+                        checks_passed = False
+                        failure_reasons.append(tax_res.message)
+                else:
+                    tax_res = tax_checker.evaluate_taxes(0.0, 0.0)
+                    tax_res.message = "Transaction simulation disabled by config"
+                    failure_reasons.append("Transaction simulation must be enabled (Ultra-Fast Sniper §3)")
                     checks_passed = False
-                    failure_reasons.append(tax_res.message)
 
-                # B. Volume snapshot check ($100 min genuine volume in primary pool)
+                # B. Volume / minimum liquidity ($100 — Ultra-Fast Sniper §3)
                 vol_res = volume_tracker.evaluate_volume_snapshot(
-                    pool_address="0xPrimaryPool",
+                    pool_address=cand.address,
                     recent_trades=[],
                 )
-                if vol_res.status != CheckResult.PASS and settings.app_env == "development":
+                if vol_res.status != CheckResult.PASS and settings.app_env in ("development", "paper"):
+                    # No live pool feed yet — allow paper/dev path with synthetic qualifying volume
                     vol_res.status = CheckResult.PASS
-                    vol_res.genuine_volume_usd = 250.0
+                    vol_res.genuine_volume_usd = max(
+                        vol_res.genuine_volume_usd,
+                        settings.min_qualifying_volume_usd,
+                    )
+                    vol_res.message = (
+                        f"Volume check bypassed in {settings.app_env} "
+                        f"(no live pool trades; synthetic ${vol_res.genuine_volume_usd:.2f})"
+                    )
 
                 if vol_res.status != CheckResult.PASS:
                     checks_passed = False
                     failure_reasons.append(vol_res.message)
 
-                # C. Contract security check (honeypot, sellability, mint/freeze)
-                sec_res = security_scanner.evaluate_security(
-                    chain_id=project.chain_id or "robinhood",
-                    ca_address=cand.address,
-                    is_sellable=True,
-                    is_honeypot=False,
-                )
-                if sec_res.status != CheckResult.PASS:
+                # C. Honeypot / security check (enabled — Ultra-Fast Sniper §3)
+                if settings.honeypot_check_enabled:
+                    if settings.app_env == "live":
+                        sec_res = security_scanner.evaluate_security(
+                            chain_id=project.chain_id or settings.default_sniper_chain_id,
+                            ca_address=cand.address,
+                            is_sellable=False,
+                            is_honeypot=True,
+                            has_liquidity_route=False,
+                        )
+                        sec_res.message = (
+                            "Security check FAILED: live scanner provider not configured. Do not buy."
+                        )
+                    else:
+                        sec_res = security_scanner.evaluate_security(
+                            chain_id=project.chain_id or settings.default_sniper_chain_id,
+                            ca_address=cand.address,
+                            is_sellable=True,
+                            is_honeypot=False,
+                        )
+                    if sec_res.status != CheckResult.PASS:
+                        checks_passed = False
+                        failure_reasons.append(sec_res.message)
+                else:
+                    sec_res = security_scanner.evaluate_security(
+                        chain_id=project.chain_id or settings.default_sniper_chain_id,
+                        ca_address=cand.address,
+                        is_sellable=False,
+                        is_honeypot=True,
+                    )
+                    sec_res.message = "Honeypot check must be enabled (Ultra-Fast Sniper §3)"
                     checks_passed = False
                     failure_reasons.append(sec_res.message)
 
@@ -476,6 +557,14 @@ async def main() -> None:
     if settings.app_env == "development":
         await create_tables()
 
+    # Preload shortlisted project docs (source of truth), then hydrate monitoring registry
+    async with AsyncSessionLocal() as session:
+        if settings.shortlist_preload_on_start:
+            shortlisted = await ShortlistLoader(session).preload()
+            logger.info("shortlist_preloaded", count=len(shortlisted))
+        await AccountManager(session).reload_registry_from_db()
+        await session.commit()
+
     x_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
     tg_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
 
@@ -499,7 +588,23 @@ async def main() -> None:
     )
     dashboard_server = uvicorn.Server(dashboard_config)
 
-    logger.info("all_phases_initialized", chains=["robinhood", "solana"], buy_tax_limit="3%", sell_tax_limit="3%")
+    from config.elysium_sniper import ELYSIUM_SNIPER
+
+    logger.info(
+        "all_phases_initialized",
+        chains=["robinhood", "solana", "elysium", "elysium_testnet"],
+        sniper_network=ELYSIUM_SNIPER.network_name,
+        sniper_evm_chain_id=ELYSIUM_SNIPER.evm_chain_id,
+        buy_amount_hype=settings.elysium_buy_amount_hype,
+        buy_tax_limit=f"{settings.max_buy_tax_pct}%",
+        sell_tax_limit=f"{settings.max_sell_tax_pct}%",
+        max_slippage=f"{settings.evm_max_slippage_pct}%",
+        min_liquidity_usd=settings.min_qualifying_volume_usd,
+        selling_mode="manual_only",
+        duplicate_purchases=settings.allow_duplicate_purchases,
+        shortlist_dir=settings.shortlist_dir,
+        execution_target_ms=f"{settings.ca_execution_target_min_ms}-{settings.ca_execution_target_max_ms}",
+    )
 
     await asyncio.gather(
         x_connector.start(),

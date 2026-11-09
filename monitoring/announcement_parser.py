@@ -32,6 +32,8 @@ _SOL_ADDRESS_RE = re.compile(r"(?<![/\w])([1-9A-HJ-NP-Za-km-z]{32,44})(?![/\w])"
 # Chain name mentions
 _CHAIN_ROBINHOOD_RE = re.compile(r"\brobinhood(?:\s+chain)?\b", re.IGNORECASE)
 _CHAIN_SOLANA_RE = re.compile(r"\b(solana|sol)\b", re.IGNORECASE)
+_CHAIN_ELYSIUM_TESTNET_RE = re.compile(r"\belysium\s+testnet\b", re.IGNORECASE)
+_CHAIN_ELYSIUM_RE = re.compile(r"\belysium\b", re.IGNORECASE)
 _CHAIN_EVM_RE = re.compile(r"\bevm\b", re.IGNORECASE)
 
 # "ProjectName token" — single capitalised word before "token"
@@ -74,6 +76,7 @@ class ParsedAnnouncement:
     published_at: Optional[datetime]
     received_at: datetime
     is_forwarded: bool
+    chat_id: Optional[str] = None
 
     # Extracted fields
     project_name: Optional[str] = None
@@ -134,12 +137,17 @@ def _extract_ca(text: str) -> Optional[str]:
 
 
 def _detect_chain(text: str) -> Optional[str]:
-    """Return ``'robinhood'``, ``'solana'``, or ``None``."""
+    """Return a supported chain_id or ``None``."""
+    # More specific names first (testnet before mainnet)
+    if _CHAIN_ELYSIUM_TESTNET_RE.search(text):
+        return "elysium_testnet"
+    if _CHAIN_ELYSIUM_RE.search(text):
+        return "elysium"
     if _CHAIN_ROBINHOOD_RE.search(text):
         return "robinhood"
     if _CHAIN_SOLANA_RE.search(text):
         return "solana"
-    # EVM without explicit chain name — cannot resolve to robinhood definitively
+    # EVM without explicit chain name — cannot resolve definitively
     if _CHAIN_EVM_RE.search(text):
         return "robinhood"  # Default EVM L2 in this project
     return None
@@ -350,9 +358,13 @@ def _extract_announcement_summary(text: str) -> str:
 
 
 def _format_network_name(chain_id: Optional[str], text: str) -> str:
-    """Return 'Solana', 'Robinhood Chain', or 'Not specified'."""
+    """Return a human-readable network name or 'Not specified'."""
     cid = (chain_id or "").lower()
     t_lower = text.lower()
+    if cid == "elysium_testnet" or "elysium testnet" in t_lower:
+        return "Elysium Testnet"
+    if cid == "elysium" or "elysium" in t_lower:
+        return "Elysium"
     if cid == "solana" or "solana" in t_lower or "$sol" in t_lower or "pump.fun" in t_lower or "raydium" in t_lower:
         return "Solana"
     if cid == "robinhood" or "robinhood" in t_lower or "rh chain" in t_lower or "evm" in t_lower or "0x" in text:
@@ -453,6 +465,7 @@ class AnnouncementParser:
             )
             text: str = message.get("text") or ""
             author_id: Optional[str] = str(a) if (a := message.get("author_id") or message.get("sender_id")) else None
+            chat_id: Optional[str] = str(c) if (c := message.get("chat_id")) is not None else None
             published_at = _coerce_datetime(message.get("published_at"))
             received_at = _coerce_datetime(message.get("received_at")) or datetime.now(tz=timezone.utc)
             is_forwarded: bool = bool(message.get("is_forwarded", False))
@@ -494,6 +507,7 @@ class AnnouncementParser:
                 published_at=published_at,
                 received_at=received_at,
                 is_forwarded=is_forwarded,
+                chat_id=chat_id,
                 project_name=project_name,
                 ticker=ticker,
                 chain_id=chain_id,

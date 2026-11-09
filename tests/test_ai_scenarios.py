@@ -796,11 +796,11 @@ def test_scenario_17_evm_contract_invalid():
 
 
 # ══════════════════════════════════════════════════════════════════
-# Scenario 18: Trading conditions not satisfied (Tax > 3% or Vol < $100)
+# Scenario 18: Trading conditions not satisfied (Tax > 2% or Vol < $100)
 # ══════════════════════════════════════════════════════════════════
 def test_scenario_18_tax_and_volume_conditions_not_satisfied():
     tax_checker = TaxChecker()
-    # Buy tax 5% exceeds max 3%
+    # Buy tax 5% exceeds max 2%
     tax_res = tax_checker.evaluate_taxes(sim_buy_tax=5.0, sim_sell_tax=1.0)
     assert tax_res.status == CheckResult.FAIL
     assert "exceeds" in tax_res.message.lower()

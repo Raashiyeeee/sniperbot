@@ -10,6 +10,7 @@ from typing import Optional
 
 import structlog
 
+from config.chains import get_chain, is_evm_chain
 from config.settings import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -47,17 +48,18 @@ class QuoteEngine:
         """
         Derive an execution quote and check slippage & price impact bounds.
 
-        Robinhood Chain (EVM):
+        EVM chains (Robinhood, Elysium mainnet/testnet):
         - Max slippage: 5.0%
         - Max price impact: 5.0%
 
         Solana:
         - Max slippage: 5.0%
         """
-        if chain_id == "robinhood":
+        chain = get_chain(chain_id)
+        if is_evm_chain(chain_id):
             max_slippage = self.settings.evm_max_slippage_pct
             max_impact = self.settings.evm_max_price_impact_pct
-            native_token = "ETH"
+            native_token = chain.native_token if chain else "ETH"
         elif chain_id == "solana":
             max_slippage = self.settings.sol_max_slippage_pct
             max_impact = 10.0  # fallback ceiling
@@ -65,7 +67,7 @@ class QuoteEngine:
         else:
             max_slippage = 5.0
             max_impact = 5.0
-            native_token = "NATIVE"
+            native_token = chain.native_token if chain else "NATIVE"
 
         # Check price impact
         if simulated_impact_pct > max_impact:
