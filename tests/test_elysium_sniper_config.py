@@ -43,8 +43,8 @@ def test_monitoring_and_buy_sections():
 
     b = ELYSIUM_SNIPER.buy
     assert b.buy_amount_hype == 1.0
-    assert b.max_slippage_pct == 3.0
-    assert b.max_buy_tax_pct == 2.0
+    assert b.max_slippage_pct == 5.0
+    assert b.max_buy_tax_pct == 3.0
     assert b.min_liquidity_usd == 100.0
     assert b.gas_strategy == "dynamic_fast"
     assert b.transaction_simulation is True
@@ -76,8 +76,8 @@ def test_settings_defaults_align_with_document():
         app_env="development",
     )
     assert settings.elysium_buy_amount_hype == 0.05
-    assert settings.max_buy_tax_pct == 2.0
-    assert settings.evm_max_slippage_pct == 3.0
+    assert settings.max_buy_tax_pct == 3.0
+    assert settings.evm_max_slippage_pct == 5.0
     assert settings.min_qualifying_volume_usd == 100.0
     assert settings.transaction_simulation_enabled is True
     assert settings.honeypot_check_enabled is True

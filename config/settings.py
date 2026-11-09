@@ -108,8 +108,8 @@ class Settings(BaseSettings):
     # Buy amount in HYPE per trade (configured to 0.05 HYPE)
     elysium_buy_amount_hype: float = 0.05
     hype_usd_price: float = 1.0  # used to map HYPE buys into USD risk caps
-    max_buy_tax_pct: float = 2.0
-    max_sell_tax_pct: float = 2.0
+    max_buy_tax_pct: float = 3.0
+    max_sell_tax_pct: float = 3.0
     min_qualifying_volume_usd: float = 100.0  # minimum liquidity / genuine volume
     per_trade_spend_cap_usd: float = 50.0
     daily_spend_cap_usd: float = 200.0
@@ -129,7 +129,7 @@ class Settings(BaseSettings):
     emergency_sell_manual_only: bool = True
 
     # ── EVM (Robinhood / Elysium) execution defaults ──────────────
-    evm_max_slippage_pct: float = 3.0
+    evm_max_slippage_pct: float = 5.0
     evm_max_price_impact_pct: float = 5.0
     # Gas strategy: Dynamic / Fast → tip multiplier on market base
     evm_gas_strategy: str = "dynamic_fast"
