@@ -96,6 +96,8 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("listx", self._cmd_list_x))
         self._app.add_handler(CommandHandler("listaccounts", self._cmd_list_x))
         self._app.add_handler(CommandHandler("network", self._cmd_network))
+        self._app.add_handler(CommandHandler("snipe", self._cmd_snipe))
+        self._app.add_handler(CommandHandler("buy", self._cmd_snipe))
         self._app.add_handler(CommandHandler("set_tg", self._cmd_set_tg))
         self._app.add_handler(CommandHandler("refresh_admins", self._cmd_refresh_admins))
         self._app.add_handler(CommandHandler("help_accounts", self._cmd_help_accounts))
@@ -488,6 +490,7 @@ class TelegramBot:
             return
         text = (
             "<b>Account & Network Management Commands:</b>\n\n"
+            "• <code>/snipe &lt;CA&gt;</code> — Instant direct manual token snipe (1s execution)\n"
             "• <code>/network</code> — View active sniper network (Mainnet vs Testnet)\n"
             "• <code>/network testnet</code> — Switch to Elysium Testnet (Chain 99801)\n"
             "• <code>/network mainnet</code> — Switch to Elysium Mainnet (Chain 99901)\n"
@@ -675,6 +678,97 @@ class TelegramBot:
         )
         if update.effective_message:
             await update.effective_message.reply_text(msg, parse_mode="HTML")
+
+    async def _cmd_snipe(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        operator_id = await self._require_operator(update)
+        if operator_id is None:
+            return
+
+        args = context.args or []
+        if not args:
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    "<b>Direct Manual Snipe:</b>\n"
+                    "• <code>/snipe &lt;CA_ADDRESS&gt;</code>\n\n"
+                    "<i>Example:</i>\n"
+                    "<code>/snipe 0x3c3Ed018F54573E1cA1ac1A68E5a4b84B65771C0</code>",
+                    parse_mode="HTML",
+                )
+            return
+
+        raw_ca = args[0].strip()
+        import re
+        if not re.match(r"^0x[a-fA-F0-9]{40}$", raw_ca):
+            if update.effective_message:
+                await update.effective_message.reply_text("❌ Invalid EVM Contract Address. Must be a 42-character 0x address.")
+            return
+
+        status_msg = None
+        if update.effective_message:
+            status_msg = await update.effective_message.reply_text(
+                f"⚡ <b>MANUAL SNIPE INITIATED</b>\n"
+                f"📋 <b>CA:</b> <code>{raw_ca}</code>\n"
+                f"⚙️ <i>Routing buy order...</i>",
+                parse_mode="HTML",
+            )
+
+        from trading.order_manager import OrderManager
+        from telegram_bot.alerts import AlertService
+
+        target_chain = settings.default_sniper_chain_id or "elysium"
+
+        async with self._AsyncSessionLocal() as session:
+            stmt = select(Project).where(Project.ca_address == raw_ca)
+            res = await session.execute(stmt)
+            project = res.scalars().first()
+
+            if not project:
+                project = Project(
+                    id=str(uuid.uuid4()),
+                    name=f"ManualSnipe-{raw_ca[:6]}",
+                    ticker=None,
+                    ca_address=raw_ca,
+                    chain_id=target_chain,
+                    status=ProjectStatus.CHECKS_PASSED,
+                    score=100.0,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+                session.add(project)
+                await session.flush()
+            else:
+                project.status = ProjectStatus.CHECKS_PASSED
+                project.chain_id = target_chain
+                project.ca_address = raw_ca
+                await session.flush()
+
+            om = OrderManager(session)
+            order, position, msg = await om.execute_approved_buy(project)
+            await session.commit()
+
+            alert_service = AlertService(self.bot)
+            if order and order.status.value == "FILLED":
+                await alert_service.send_buy_success(project, order, position)
+                if status_msg:
+                    await status_msg.edit_text(
+                        f"✅ <b>MANUAL SNIPE SUCCESSFUL!</b>\n"
+                        f"📋 <b>CA:</b> <code>{raw_ca}</code>\n"
+                        f"🔗 <b>Tx:</b> <code>{order.tx_hash}</code>",
+                        parse_mode="HTML",
+                    )
+            else:
+                err_text = msg or (order.error_message if order else "Execution failed")
+                await alert_service.send_buy_failed(project, err_text, order)
+                if status_msg:
+                    await status_msg.edit_text(
+                        f"❌ <b>MANUAL SNIPE FAILED</b>\n"
+                        f"⚠️ <b>Reason:</b> {err_text}",
+                        parse_mode="HTML",
+                    )
 
     async def _cmd_set_x(
         self,

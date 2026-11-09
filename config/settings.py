@@ -7,7 +7,7 @@ All risk limits are configurable here — never hardcode them.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_operator_ids: str = ""          # comma-separated
     telegram_alert_chat_id: str = ""
+    telegram_api_id: Optional[int] = None
+    telegram_api_hash: str = ""
+    telegram_session_string: str = ""
+    telegram_userbot_chats: str = ""         # comma-separated chat IDs, usernames, or group titles
 
     # ── X / Twitter ───────────────────────────────────────────────
     x_bearer_token: str = ""

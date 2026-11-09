@@ -575,6 +575,8 @@ async def main() -> None:
     else:
         x_connector = XStreamConnector(x_queue)
     tg_listener = TelegramListenerConnector(tg_queue, app=tg_bot._app)
+    from connectors.telegram_userbot import TelegramUserbotConnector
+    tg_userbot = TelegramUserbotConnector(tg_queue)
 
     web_port = int(os.environ.get("PORT", 8000))
     dashboard_config = uvicorn.Config(
@@ -606,6 +608,7 @@ async def main() -> None:
     await asyncio.gather(
         x_connector.start(),
         tg_listener.start(),
+        tg_userbot.start(),
         tg_bot.start(),
         run_pipeline(x_queue, tg_queue, alert_service),
         expiry_scheduler(alert_service),
