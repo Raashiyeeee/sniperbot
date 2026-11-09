@@ -98,12 +98,25 @@ class EVMExecutor:
             )
 
         # Live execution path (requires funded wallet private key)
-        # Web3.py execution would go here
+        # Requires: pip install web3
+        pk = self.settings.evm_private_key
+        if not pk:
+            return ExecutionResult(
+                success=False,
+                tx_hash=None,
+                fee_spent=0.0,
+                confirmed_tokens_received=0.0,
+                execution_latency_ms=(time.perf_counter() - start_time) * 1000,
+                error_message="EVM_PRIVATE_KEY not set in .env — cannot execute live trade.",
+            )
+
+        # TODO: integrate web3.py signing + DEX router call here.
+        # For now return a helpful error rather than a silent no-op.
         return ExecutionResult(
             success=False,
             tx_hash=None,
             fee_spent=0.0,
             confirmed_tokens_received=0.0,
             execution_latency_ms=(time.perf_counter() - start_time) * 1000,
-            error_message="Live execution mode requires explicit funded wallet configuration",
+            error_message="Live execution mode: web3 DEX router integration pending.",
         )

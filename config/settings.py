@@ -48,7 +48,9 @@ class Settings(BaseSettings):
     # ── RapidAPI Twitter/X ─────────────────────────────────────────
     rapidapi_key: str = ""
     rapidapi_twitter_host: str = "twitter-api45.p.rapidapi.com"
-    rapidapi_poll_interval_seconds: float = 300.0
+    rapidapi_poll_interval_seconds: float = 60.0
+    # Faster cadence for approved official handles (target CA→buy within seconds)
+    rapidapi_approved_poll_interval_seconds: float = 3.0
     rapidapi_search_queries: str = '"CA soon" OR "contract dropping soon"'
     min_tweet_date: str = "2026-10-01"
 
@@ -73,23 +75,69 @@ class Settings(BaseSettings):
     require_manual_project_approval: bool = True
     require_verified_official_ca: bool = True
     enable_live_trading: bool = False
+    # Target mid-range of the 1–5s Ultra-Fast Sniper window
     ca_execution_target_ms: int = 2000
+    ca_execution_target_min_ms: int = 1000
+    ca_execution_target_max_ms: int = 5000
 
-    # ── Risk limits ───────────────────────────────────────────────
-    max_buy_tax_pct: float = 3.0
-    max_sell_tax_pct: float = 3.0
-    min_qualifying_volume_usd: float = 100.0
-    per_trade_spend_cap_usd: float = 50.0
-    daily_spend_cap_usd: float = 200.0
-    daily_loss_cap_usd: float = 150.0
+    # ── Wallet (EVM / Elysium) ────────────────────────────────────
+    # Set EVM_PRIVATE_KEY in .env — NEVER commit the real key.
+    # Leave blank to remain in paper/simulation mode.
+    evm_private_key: str = ""
+
+    # ── Shortlist preload (Elysium sniper project docs) ───────────
+    # Directory of *.json project configs (see config/shortlist/_template.json)
+    shortlist_dir: str = "config/shortlist"
+    shortlist_preload_on_start: bool = True
+
+    # Default sniper chain (Ultra-Fast Sniper config)
+    default_sniper_chain_id: str = "elysium"
+
+    # ── Monitoring (Elysium Ultra-Fast Sniper §2) ─────────────────
+    x_ca_detection_enabled: bool = True
+    telegram_ca_detection_enabled: bool = True
+    telegram_admin_verification_required: bool = True
+    ignore_non_admin_telegram_ca: bool = True
+    duplicate_ca_detection_enabled: bool = True
+
+    # ── Risk / buy limits (Elysium Ultra-Fast Sniper §3) ──────────
+    # Buy amount in HYPE per trade. User wants max 0.08 HYPE per buy.
+    elysium_buy_amount_hype: float = 0.08
+    hype_usd_price: float = 1.0  # used to map HYPE buys into USD risk caps
+    max_buy_tax_pct: float = 2.0
+    max_sell_tax_pct: float = 2.0
+    min_qualifying_volume_usd: float = 100.0  # minimum liquidity / genuine volume
+    per_trade_spend_cap_usd: float = 0.08    # hard cap: max 0.08 HYPE per trade
+    daily_spend_cap_usd: float = 0.24        # hard cap: max 3 trades per day
+    daily_loss_cap_usd: float = 0.16         # stop trading if >0.16 HYPE lost today
     max_open_positions: int = 3
+    transaction_simulation_enabled: bool = True
+    honeypot_check_enabled: bool = True
+    allow_duplicate_purchases: bool = False  # Disabled
 
-    # ── EVM (Robinhood Chain) execution defaults ──────────────────
+    # ── Selling (Elysium Ultra-Fast Sniper §5) ────────────────────
+    # All automatic exits OFF — manual sell / emergency only
+    automatic_take_profit: bool = False
+    automatic_stop_loss: bool = False
+    trailing_stop: bool = False
+    automatic_sell: bool = False
+    manual_sell_enabled: bool = True
+    emergency_sell_manual_only: bool = True
+
+    # ── EVM (Robinhood / Elysium) execution defaults ──────────────
     evm_max_slippage_pct: float = 5.0
     evm_max_price_impact_pct: float = 5.0
+    # Gas strategy: Dynamic / Fast → tip multiplier on market base
+    evm_gas_strategy: str = "dynamic_fast"
     evm_gas_tip_multiplier: float = 1.5      # market rate × 1.5
     evm_max_gas_price_gwei: int = 500
     evm_tx_deadline_seconds: int = 60
+
+    # ── Elysium RPC endpoints (HTTP + WS, multi-endpoint) ─────────
+    elysium_rpc_url: str = "https://rpc.elysp.com"
+    elysium_rpc_fallback_urls: str = ""  # comma-separated extra HTTP RPCs
+    elysium_ws_rpc_url: str = ""         # WebSocket RPC for fast confirmations
+    elysium_testnet_rpc_url: str = "https://testnet-rpc.elysium.kinetiq.xyz"
 
     # ── Solana execution defaults ─────────────────────────────────
     sol_max_slippage_pct: float = 5.0
@@ -111,6 +159,28 @@ class Settings(BaseSettings):
         if not self.telegram_operator_ids:
             return []
         return [int(x.strip()) for x in self.telegram_operator_ids.split(",") if x.strip()]
+
+    @property
+    def elysium_rpc_urls(self) -> List[str]:
+        """Primary + fallback HTTP RPC endpoints for Elysium mainnet."""
+        urls = [self.elysium_rpc_url] if self.elysium_rpc_url else []
+        if self.elysium_rpc_fallback_urls:
+            urls.extend(
+                u.strip() for u in self.elysium_rpc_fallback_urls.split(",") if u.strip()
+            )
+        # Deduplicate preserving order
+        seen = set()
+        out: List[str] = []
+        for u in urls:
+            if u not in seen:
+                seen.add(u)
+                out.append(u)
+        return out
+
+    @property
+    def elysium_buy_amount_usd(self) -> float:
+        """Map configured 1 HYPE buy into USD risk accounting."""
+        return float(self.elysium_buy_amount_hype) * float(self.hype_usd_price)
 
     @property
     def is_live(self) -> bool:
